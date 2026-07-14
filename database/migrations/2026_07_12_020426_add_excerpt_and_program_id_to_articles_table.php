@@ -1,25 +1,19 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('articles', function (Blueprint $table) {
-            $table->text('excerpt')->nullable()->after('content');
-            $table->unsignedBigInteger('program_id')->nullable()->after('thumbnail');
-            $table->foreign('program_id')->references('id')->on('programs')->nullOnDelete();
-        });
+        // No-op: kolom excerpt, program_id, dan foreign key-nya
+        // sudah dibuat langsung di 2025_01_01_000020_create_articles_table.php.
+        // Migration ini dibiarkan ada (tidak dihapus) karena sudah tercatat
+        // sebagai "ran" di tabel migrations pada server production.
     }
 
     public function down(): void
     {
-        Schema::table('articles', function (Blueprint $table) {
-            $table->dropForeign(['program_id']);
-            $table->dropColumn(['excerpt', 'program_id']);
-        });
+        // No-op juga, sesuai isi up() di atas.
     }
 };
