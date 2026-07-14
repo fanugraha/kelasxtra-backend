@@ -62,7 +62,8 @@ class TiuPaket2Seeder extends Seeder
             $question = Question::create([
                 'bank_id' => $bank->id,
                 'question_text' => $q['text'],
-                'image_url' => null,
+                'media_url' => null,
+                'media_type' => 'none',
                 'type' => 'pg',
                 'difficulty' => 'sedang',
             ]);

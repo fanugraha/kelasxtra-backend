@@ -130,7 +130,7 @@ class DummyExamSeeder extends Seeder
         foreach ($questionsData as $data) {
             $question = Question::firstOrCreate(
                 ['bank_id' => $bank->id, 'question_text' => $data['question_text']],
-                ['type' => $data['type'], 'difficulty' => $data['difficulty'], 'image_url' => null]
+                ['type' => $data['type'], 'difficulty' => $data['difficulty'], 'media_url' => null, 'media_type' => 'none']
             );
 
             foreach ($data['options'] as $opt) {
@@ -159,6 +159,13 @@ class DummyExamSeeder extends Seeder
             if (! $exam->questions()->where('questions.id', $qid)->exists()) {
                 $exam->questions()->attach($qid, ['points' => $points[$i]]);
             }
+        }
+
+        // 7b. Buka akses exam ini lewat package (relasi package_exam) —
+        // wajib supaya AccessControlService::canAttemptExam() meloloskan
+        // siswa test yang sudah enrollment aktif ke package ini.
+        if (! $package->exams()->where('exams.id', $exam->id)->exists()) {
+            $package->exams()->attach($exam->id);
         }
 
         // 8. Exam batch untuk testing try out (window 1 jam dari sekarang)

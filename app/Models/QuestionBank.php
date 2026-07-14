@@ -48,8 +48,4 @@ class QuestionBank extends Model
         return $this->hasMany(QuestionPassage::class);
     }
 
-    public function packages(): BelongsToMany
-    {
-        return $this->belongsToMany(Package::class, 'package_question_bank');
-    }
 }

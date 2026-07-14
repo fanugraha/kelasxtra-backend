@@ -156,18 +156,17 @@ public function myExams(Request $request)
  * GET /api/packages/{package}/exams
  * Daftar exam yang termasuk dalam SATU package spesifik — dipakai halaman
  * "Latihan Soal" per-package (PackageExams.jsx). Sengaja pakai relasi
- * package->questionBanks eksplisit, bukan cocokkan program_id, supaya
- * tidak ikut menampilkan exam dari package lain yang kebetulan program-nya
- * sama.
+ * package->exams eksplisit (bukan lewat bank_id), supaya admin bisa
+ * memilih exam mana saja yang dijual di package ini, bahkan kalau bank
+ * soal itu punya beberapa exam lain yang tidak ikut dijual.
  */
 public function forPackage(Request $request, \App\Models\Package $package)
 {
     $user = $request->user();
-    $bankIds = $package->questionBanks()->pluck('question_banks.id');
 
-    $exams = Exam::with('bank')
+    $exams = $package->exams()
+        ->with('bank')
         ->withCount('questions')
-        ->whereIn('bank_id', $bankIds)
         ->get();
 
     return $exams

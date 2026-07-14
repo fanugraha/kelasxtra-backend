@@ -33,13 +33,13 @@ class AccessControlService
             return true;
         }
 
-        // Bank soal hanya bisa diakses lewat paket yang secara eksplisit
-        // "membuka" bank soal ini (relasi package_question_bank). Ini sengaja
-        // tidak lagi mengandalkan kecocokan program_id/subject_id semata,
-        // karena itu membuat SEMUA bank soal di program yang sama otomatis
-        // ikut terbuka meski user tidak membeli paket untuk bank soal tsb.
+        // Exam hanya bisa diakses lewat paket yang secara eksplisit "membuka"
+        // exam ini (relasi package_exam). Ini sengaja tidak lagi mengandalkan
+        // kecocokan bank_id/program_id semata, karena itu membuat SEMUA exam
+        // di bank soal yang sama otomatis ikut terbuka meski admin cuma mau
+        // jual sebagian exam-nya lewat paket ini.
         return $user->enrollments()->active()
-            ->whereHas('package.questionBanks', fn ($q) => $q->where('question_banks.id', $exam->bank_id))
+            ->whereHas('package.exams', fn ($q) => $q->where('exams.id', $exam->id))
             ->exists();
     }
 }

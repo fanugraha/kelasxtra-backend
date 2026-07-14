@@ -70,8 +70,8 @@ class Package extends Model
         return $this->hasMany(Transaction::class);
     }
 
-    public function questionBanks(): BelongsToMany
+    public function exams(): BelongsToMany
     {
-        return $this->belongsToMany(QuestionBank::class, 'package_question_bank');
+        return $this->belongsToMany(Exam::class, 'package_exam');
     }
 }

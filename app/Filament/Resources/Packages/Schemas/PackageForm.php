@@ -7,7 +7,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use App\Models\QuestionBank;
+use App\Models\Exam;
 
 class PackageForm
 {
@@ -42,9 +42,9 @@ class PackageForm
                     ])
                     ->required()
                     ->live(),
-                Select::make('questionBanks')
-                    ->label('Bank Soal yang Dijual')
-                    ->relationship('questionBanks', 'title')
+                Select::make('exams')
+                    ->label('Exam/Ujian yang Dijual')
+                    ->relationship('exams', 'title')
                     ->multiple()
                     ->searchable()
                     ->preload()
@@ -54,12 +54,14 @@ class PackageForm
                         $programId = $get('program_id');
                         $subjectId = $get('subject_id');
 
-                        return QuestionBank::query()
-                            ->when($programId, fn ($q) => $q->where('program_id', $programId))
-                            ->when($subjectId, fn ($q) => $q->where('subject_id', $subjectId))
-                            ->pluck('title', 'id');
+                        return Exam::query()
+                            ->with('bank')
+                            ->when($programId, fn ($q) => $q->whereHas('bank', fn ($b) => $b->where('program_id', $programId)))
+                            ->when($subjectId, fn ($q) => $q->whereHas('bank', fn ($b) => $b->where('subject_id', $subjectId)))
+                            ->get()
+                            ->mapWithKeys(fn ($exam) => [$exam->id => $exam->title . ' (' . $exam->bank->title . ')']);
                     })
-                    ->helperText('Pilih bank soal yang akan dibuka aksesnya untuk siswa yang membeli paket ini. Bank soal yang tidak dipilih di sini TIDAK akan bisa diakses meski satu program.'),
+                    ->helperText('Pilih exam/ujian mana saja yang akan dibuka aksesnya untuk siswa yang membeli paket ini. Exam yang tidak dipilih di sini TIDAK akan bisa diakses meski satu bank soal.'),
                 TextInput::make('price')
                     ->required()
                     ->numeric()
