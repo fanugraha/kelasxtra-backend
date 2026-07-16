@@ -15,6 +15,8 @@ use App\Http\Controllers\Api\ExamBatchController;
 use App\Http\Controllers\Api\EnrollmentController;
 use App\Http\Controllers\Api\ArticleController;
 use App\Http\Controllers\Api\PromoController;
+use App\Http\Controllers\Api\TutorController;
+use App\Http\Controllers\Api\TestimonialController;
 
 /*
 |--------------------------------------------------------------------------
@@ -56,6 +58,8 @@ Route::get('/packages/{package}', [PackageController::class, 'show']);
 Route::get('/articles', [ArticleController::class, 'index']);
 Route::get('/articles/{slug}', [ArticleController::class, 'show']);
 Route::get('/promos/active', [PromoController::class, 'active']);
+Route::get('/tutors', [TutorController::class, 'index']);
+Route::get('/testimonials', [TestimonialController::class, 'index']);
 Route::post('/promos/validate', [PromoController::class, 'validateCode'])
     ->middleware(['auth:sanctum', 'throttle:20,1']);
 
@@ -93,6 +97,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/my-exams', [ExamController::class, 'myExams']);
     Route::get('/exams/{exam}/summary', [ExamController::class, 'summary']);
+    Route::get('/exams/{exam}/banks', [ExamController::class, 'banks']);
     Route::get('/exams/{exam}/attempts', [ExamController::class, 'attempts']);
     Route::get('/exam-attempts/{attempt}/review', [ExamController::class, 'review']);
     Route::get('/packages/{package}/exams', [ExamController::class, 'forPackage']);

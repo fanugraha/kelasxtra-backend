@@ -59,6 +59,7 @@ class ExamController extends Controller
     {
         $user = $request->user();
         $exam = Exam::findOrFail($request->validated('exam_id'));
+        $bankId = $request->validated('bank_id');
 
         if (!$this->accessControl->canAttemptExam($user, $exam)) {
             return response()->json([
@@ -80,19 +81,29 @@ class ExamController extends Controller
                     'batch_end_at' => $batch->end_at,
                 ], 422);
             }
-
-            $existing = ExamAttempt::where('user_id', $user->id)
-                ->where('exam_id', $exam->id)
-                ->where('exam_batch_id', $batch->id)
-                ->first();
-
-            if ($existing) {
-                return new ExamAttemptResource($existing->load('exam'));
-            }
         }
 
-        $attempt = DB::transaction(function () use ($exam, $batch, $user) {
-            $questions = $exam->questions()->with('options')->get();
+        // Cek attempt existing untuk kombinasi exam + batch + bank ini. Siswa
+        // bisa punya attempt terpisah per bank soal (1 exam bisa jual banyak
+        // bank), jadi bank_id ikut jadi kunci pencarian resume.
+        $existing = ExamAttempt::where('user_id', $user->id)
+            ->where('exam_id', $exam->id)
+            ->where('exam_batch_id', $batch?->id)
+            ->where('bank_id', $bankId)
+            ->first();
+
+        if ($existing) {
+            return new ExamAttemptResource($existing->load('exam'));
+        }
+
+        $attempt = DB::transaction(function () use ($exam, $batch, $user, $bankId) {
+            // Soal difilter ke bank yang dipilih siswa saja -- 1 attempt = 1 bank,
+            // supaya nilai & jumlah soal (TWK/TIU/TKP) sesuai isi bank itu sendiri,
+            // bukan gabungan semua bank yang nempel ke exam ini.
+            $questions = $exam->questions()
+                ->whereHas('bank', fn ($q) => $q->where('question_banks.id', $bankId))
+                ->with('options')
+                ->get();
 
             $questionOrder = [
                 'questions' => $questions->pluck('id')->shuffle()->values(),
@@ -111,6 +122,7 @@ class ExamController extends Controller
                 'user_id' => $user->id,
                 'exam_id' => $exam->id,
                 'exam_batch_id' => $batch?->id,
+                'bank_id' => $bankId,
                 'question_order' => $questionOrder,
                 'started_at' => now(),
                 'status' => 'in_progress',
@@ -127,30 +139,82 @@ class ExamController extends Controller
      */
 
     /**
- * GET /api/my-exams
- * Daftar exam yang boleh diakses siswa — reuse AccessControlService::canAttemptExam()
- * (logic sama persis dengan yang dipakai start(), supaya tidak ada 2 sumber kebenaran
- * soal siapa boleh akses exam apa).
- */
-public function myExams(Request $request)
-{
-    $user = $request->user();
+     * Ambil daftar bank soal yang benar-benar dipakai di tiap exam (dari soal
+     * yang ter-attach), plus daftar program_id turunannya. Dipakai myExams()
+     * dan forPackage() supaya frontend bisa menampilkan pilihan bank sebelum
+     * siswa mulai ujian, dan supaya program_id tidak lagi cuma diambil dari
+     * kolom bank_id tunggal di tabel exams (yang cuma menunjuk 1 bank,
+     * padahal satu exam bisa menjual gabungan banyak bank).
+     *
+     * @param  \Illuminate\Support\Collection  $exams
+     * @return array<int, array{banks: array, program_ids: array}>
+     */
+    private function resolveAvailableBanks($exams): array
+    {
+        $bankIdsByExam = [];
 
-    $exams = Exam::with('bank')->withCount('questions')->get();
+        foreach ($exams as $exam) {
+            $bankIdsByExam[$exam->id] = $exam->questions()
+                ->select('questions.bank_id')
+                ->distinct()
+                ->pluck('bank_id')
+                ->filter()
+                ->values()
+                ->all();
+        }
 
-    return $exams
-        ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
-        ->values()
-        ->map(fn (Exam $exam) => [
-            'id' => $exam->id,
-            'title' => $exam->title,
-            'duration_minutes' => $exam->duration_minutes,
-            'passing_score' => $exam->passing_score,
-            'questions_count' => $exam->questions_count,
-            'is_free_preview' => $exam->is_free_preview,
-            'program_id' => $exam->bank->program_id,
-        ]);
-}
+        $allBankIds = collect($bankIdsByExam)->flatten()->unique()->values();
+
+        $banksById = \App\Models\QuestionBank::whereIn('id', $allBankIds)
+            ->get(['id', 'title', 'program_id'])
+            ->keyBy('id');
+
+        $result = [];
+
+        foreach ($bankIdsByExam as $examId => $bankIds) {
+            $banks = collect($bankIds)->map(fn ($id) => $banksById->get($id))->filter();
+
+            $result[$examId] = [
+                'banks' => $banks->map(fn ($bank) => [
+                    'id' => $bank->id,
+                    'title' => $bank->title,
+                ])->values()->all(),
+                'program_ids' => $banks->pluck('program_id')->filter()->unique()->values()->all(),
+            ];
+        }
+
+        return $result;
+    }
+
+/**
+     * GET /api/my-exams
+     * Daftar exam yang boleh diakses siswa — reuse AccessControlService::canAttemptExam()
+     * (logic sama persis dengan yang dipakai start(), supaya tidak ada 2 sumber kebenaran
+     * soal siapa boleh akses exam apa).
+     */
+    public function myExams(Request $request)
+    {
+        $user = $request->user();
+
+        $exams = Exam::with('bank')->withCount('questions')->get();
+
+        $bankInfo = $this->resolveAvailableBanks($exams);
+
+        return $exams
+            ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
+            ->values()
+            ->map(fn (Exam $exam) => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+                'duration_minutes' => $exam->duration_minutes,
+                'passing_score' => $exam->passing_score,
+                'questions_count' => $exam->questions_count,
+                'is_free_preview' => $exam->is_free_preview,
+                'program_id' => $exam->bank->program_id,
+                'program_ids' => $bankInfo[$exam->id]['program_ids'] ?? [],
+                'available_banks' => $bankInfo[$exam->id]['banks'] ?? [],
+            ]);
+    }
 
 /**
  * GET /api/packages/{package}/exams
@@ -161,26 +225,29 @@ public function myExams(Request $request)
  * soal itu punya beberapa exam lain yang tidak ikut dijual.
  */
 public function forPackage(Request $request, \App\Models\Package $package)
-{
-    $user = $request->user();
+    {
+        $user = $request->user();
 
-    $exams = $package->exams()
-        ->with('bank')
-        ->withCount('questions')
-        ->get();
+        $exams = $package->exams()
+            ->with('bank')
+            ->withCount('questions')
+            ->get();
 
-    return $exams
-        ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
-        ->values()
-        ->map(fn (Exam $exam) => [
-            'id' => $exam->id,
-            'title' => $exam->title,
-            'duration_minutes' => $exam->duration_minutes,
-            'passing_score' => $exam->passing_score,
-            'questions_count' => $exam->questions_count,
-            'is_free_preview' => $exam->is_free_preview,
-        ]);
-}
+        $bankInfo = $this->resolveAvailableBanks($exams);
+
+        return $exams
+            ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
+            ->values()
+            ->map(fn (Exam $exam) => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+                'duration_minutes' => $exam->duration_minutes,
+                'passing_score' => $exam->passing_score,
+                'questions_count' => $exam->questions_count,
+                'is_free_preview' => $exam->is_free_preview,
+                'available_banks' => $bankInfo[$exam->id]['banks'] ?? [],
+            ]);
+    }
 
     /**
      * GET /api/exams/{exam}/summary
@@ -190,6 +257,33 @@ public function forPackage(Request $request, \App\Models\Package $package)
      * Sengaja hanya melihat attempt mandiri (exam_batch_id null); attempt
      * dari try out batch punya leaderboard sendiri dan tidak dicampur di sini.
      */
+    /**
+     * GET /api/exams/{exam}/banks
+     * Daftar bank yang bisa dipilih untuk exam ini -- dipakai halaman
+     * pemilihan bank sebelum siswa mulai mengerjakan. StartExamRequest
+     * nantinya memvalidasi bank_id yang dikirim siswa terhadap daftar ini.
+     */
+    public function banks(Request $request, Exam $exam)
+    {
+        $user = $request->user();
+
+        if (!$exam->is_free_preview && !$this->accessControl->canAttemptExam($user, $exam)) {
+            return response()->json([
+                'message' => 'Anda tidak memiliki akses untuk melihat exam ini.',
+            ], 403);
+        }
+
+        $bankInfo = $this->resolveAvailableBanks(collect([$exam]));
+
+        return response()->json([
+            'exam' => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+            ],
+            'banks' => $bankInfo[$exam->id]['banks'] ?? [],
+        ]);
+    }
+
     public function summary(Request $request, Exam $exam)
     {
         $user = $request->user();
@@ -202,10 +296,13 @@ public function forPackage(Request $request, \App\Models\Package $package)
 
         $exam->load('sections');
 
+        $bankId = $request->query('bank_id');
+
         $attempts = ExamAttempt::where('user_id', $user->id)
             ->where('exam_id', $exam->id)
             ->whereNull('exam_batch_id')
-            ->with('sectionScores')
+            ->when($bankId, fn ($q) => $q->where('bank_id', $bankId))
+            ->with(['sectionScores', 'bank:id,title'])
             ->orderBy('started_at')
             ->get();
 
@@ -236,6 +333,10 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 'correct_count' => $attempt->correct_count,
                 'sections' => $sections->values(),
                 'passed' => $passed,
+                'bank' => $attempt->bank ? [
+                    'id' => $attempt->bank->id,
+                    'title' => $attempt->bank->title,
+                ] : null,
             ];
         };
 
@@ -288,11 +389,14 @@ public function forPackage(Request $request, \App\Models\Package $package)
 
         $exam->load('sections');
 
+        $bankId = $request->query('bank_id');
+
         $attempts = ExamAttempt::where('user_id', $user->id)
             ->where('exam_id', $exam->id)
             ->whereNull('exam_batch_id')
             ->whereIn('status', ['submitted', 'auto_submitted', 'graded'])
-            ->with('sectionScores')
+            ->when($bankId, fn ($q) => $q->where('bank_id', $bankId))
+            ->with(['sectionScores', 'bank:id,title'])
             ->orderBy('started_at')
             ->get();
 
@@ -323,6 +427,10 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 'correct_count' => $attempt->correct_count,
                 'sections' => $sections->values(),
                 'passed' => $passed,
+                'bank' => $attempt->bank ? [
+                    'id' => $attempt->bank->id,
+                    'title' => $attempt->bank->title,
+                ] : null,
             ];
         };
 

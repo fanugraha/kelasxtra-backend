@@ -15,6 +15,7 @@ class ExamAttempt extends Model
         'user_id',
         'exam_id',
         'exam_batch_id',
+        'bank_id',
         'score',
         'correct_count',
         'started_at',
@@ -90,6 +91,11 @@ class ExamAttempt extends Model
     public function examBatch(): BelongsTo
     {
         return $this->belongsTo(ExamBatch::class);
+    }
+
+    public function bank(): BelongsTo
+    {
+        return $this->belongsTo(QuestionBank::class, 'bank_id');
     }
 
     public function answers(): HasMany
