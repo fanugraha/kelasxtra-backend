@@ -37,11 +37,12 @@ class ExamResource extends Resource
     {
         return $schema->components([
             Select::make('bank_id')
-                ->label('Bank Soal')
+                ->label('Bank Utama (kategorisasi)')
                 ->relationship('bank', 'title')
                 ->required()
                 ->searchable()
-                ->preload(),
+                ->preload()
+                ->helperText('Dipakai untuk kategorisasi/label saja -- soal exam ini bisa berasal dari bank manapun lewat tab "Soal dalam Exam Ini" di bawah, tidak dibatasi oleh pilihan di sini.'),
             TextInput::make('title')
                 ->required()
                 ->maxLength(255),
@@ -63,7 +64,15 @@ class ExamResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('title')->searchable()->sortable(),
-                TextColumn::make('bank.title')->label('Bank Soal'),
+                TextColumn::make('bank.title')->label('Bank Utama'),
+                TextColumn::make('available_banks')
+                    ->label('Bank yang Dipakai')
+                    ->getStateUsing(fn (Exam $record) => $record->questions()
+                        ->join('question_banks', 'questions.bank_id', '=', 'question_banks.id')
+                        ->distinct()
+                        ->pluck('question_banks.title')
+                        ->implode(', '))
+                    ->wrap(),
                 TextColumn::make('duration_minutes')->suffix(' menit'),
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
                 IconColumn::make('is_free_preview')->label('Free Preview')->boolean(),
