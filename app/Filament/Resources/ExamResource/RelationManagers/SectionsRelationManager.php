@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\ExamResource\RelationManagers;
 
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
+use Filament\Notifications\Notification;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
@@ -89,7 +91,53 @@ class SectionsRelationManager extends RelationManager
                 TextColumn::make('max_score')->label('Skor Maks'),
                 IconColumn::make('is_locked_after_next')->label('Terkunci')->boolean(),
             ])
-            ->headerActions([CreateAction::make()])
+            ->headerActions([
+                Action::make('generateFromProgram')
+                    ->label('Generate dari Program')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalDescription('Membuat section untuk setiap kategori (TWK/TIU/TKP dst) di program exam ini, memakai passing_grade dari master data Kategori. Field "Skor Maksimal" & "Durasi" tetap perlu diisi manual sesudahnya sesuai jumlah soal.')
+                    ->action(function () {
+                        $exam = $this->getOwnerRecord();
+                        $bank = $exam->bank;
+
+                        if (!$bank || !$bank->program) {
+                            Notification::make()->title('Bank soal exam ini tidak terhubung ke Program.')->danger()->send();
+                            return;
+                        }
+
+                        $existingCategoryIds = $exam->sections()->pluck('category_id')->all();
+                        $order = $exam->sections()->max('order') ?? 0;
+                        $created = 0;
+
+                        foreach ($bank->program->categories as $category) {
+                            if (in_array($category->id, $existingCategoryIds)) {
+                                continue;
+                            }
+                            $order++;
+                            $exam->sections()->create([
+                                'category_id' => $category->id,
+                                'code' => $category->code,
+                                'name' => $category->name,
+                                'order' => $order,
+                                'scoring_type' => 'single_correct',
+                                'points_per_question' => 1,
+                                'min_passing_score' => $category->passing_grade,
+                                'max_score' => 0,
+                                'duration_minutes' => 0,
+                            ]);
+                            $created++;
+                        }
+
+                        Notification::make()
+                            ->title($created > 0
+                                ? "{$created} section dibuat dari kategori program. Lengkapi Skor Maksimal & Durasi tiap section, lalu assign ulang soal-soal yang exam_section_id-nya masih kosong."
+                                : 'Semua kategori program sudah punya section di exam ini.')
+                            ->success()
+                            ->send();
+                    }),
+                CreateAction::make(),
+            ])
             ->recordActions([EditAction::make(), DeleteAction::make()]);
     }
 }

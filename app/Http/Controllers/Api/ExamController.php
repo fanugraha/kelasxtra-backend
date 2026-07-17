@@ -59,6 +59,7 @@ class ExamController extends Controller
     {
         $user = $request->user();
         $exam = Exam::findOrFail($request->validated('exam_id'));
+        $bankId = $request->validated('bank_id');
 
         if (!$this->accessControl->canAttemptExam($user, $exam)) {
             return response()->json([
@@ -80,19 +81,35 @@ class ExamController extends Controller
                     'batch_end_at' => $batch->end_at,
                 ], 422);
             }
-
-            $existing = ExamAttempt::where('user_id', $user->id)
-                ->where('exam_id', $exam->id)
-                ->where('exam_batch_id', $batch->id)
-                ->first();
-
-            if ($existing) {
-                return new ExamAttemptResource($existing->load('exam'));
-            }
         }
 
-        $attempt = DB::transaction(function () use ($exam, $batch, $user) {
-            $questions = $exam->questions()->with('options')->get();
+        // Cek attempt existing untuk kombinasi exam + batch + bank ini. Siswa
+        // bisa punya attempt terpisah per bank soal (1 exam bisa jual banyak
+        // bank), jadi bank_id ikut jadi kunci pencarian resume.
+        // Hanya resume attempt yang BELUM selesai (in_progress). Attempt yang
+        // sudah graded/submitted/auto_submitted harus memicu attempt BARU saat
+        // siswa klik "Ulangi Ujian" -- sebelumnya query ini tidak filter status,
+        // jadi siswa yang mengulang selalu diarahkan ke attempt lama yang sudah
+        // selesai (redirect balik oleh frontend karena status != in_progress).
+        $existing = ExamAttempt::where('user_id', $user->id)
+            ->where('exam_id', $exam->id)
+            ->where('exam_batch_id', $batch?->id)
+            ->where('bank_id', $bankId)
+            ->where('status', 'in_progress')
+            ->first();
+
+        if ($existing) {
+            return new ExamAttemptResource($existing->load('exam'));
+        }
+
+        $attempt = DB::transaction(function () use ($exam, $batch, $user, $bankId) {
+            // Soal difilter ke bank yang dipilih siswa saja -- 1 attempt = 1 bank,
+            // supaya nilai & jumlah soal (TWK/TIU/TKP) sesuai isi bank itu sendiri,
+            // bukan gabungan semua bank yang nempel ke exam ini.
+            $questions = $exam->questions()
+                ->whereHas('bank', fn ($q) => $q->where('question_banks.id', $bankId))
+                ->with('options')
+                ->get();
 
             $questionOrder = [
                 'questions' => $questions->pluck('id')->shuffle()->values(),
@@ -107,15 +124,31 @@ class ExamController extends Controller
                 })->values(),
             ];
 
-            return ExamAttempt::create([
+            $newAttempt = ExamAttempt::create([
                 'user_id' => $user->id,
                 'exam_id' => $exam->id,
                 'exam_batch_id' => $batch?->id,
+                'bank_id' => $bankId,
                 'question_order' => $questionOrder,
                 'started_at' => now(),
                 'status' => 'in_progress',
                 'tab_switch_count' => 0,
             ]);
+
+            // Mode timer per-section (TOEFL-style): mulai dari section
+            // dengan order paling kecil. Mode timer global (CPNS-style)
+            // tidak menyentuh kolom ini sama sekali -- tetap null.
+            if ($exam->uses_section_timers) {
+                $firstSection = $exam->sections()->orderBy('order')->first();
+                if ($firstSection) {
+                    $newAttempt->update([
+                        'current_section_id' => $firstSection->id,
+                        'section_started_at' => $newAttempt->started_at,
+                    ]);
+                }
+            }
+
+            return $newAttempt;
         });
         return new ExamAttemptResource($attempt->load('exam.questions.options'));
     }
@@ -127,6 +160,59 @@ class ExamController extends Controller
      */
 
     /**
+     * Ambil daftar bank soal yang benar-benar dipakai di tiap exam (dari soal
+     * yang ter-attach), plus daftar program_id turunannya. Dipakai myExams()
+     * dan forPackage() supaya frontend bisa menampilkan pilihan bank sebelum
+     * siswa mulai ujian, dan supaya program_id tidak lagi cuma diambil dari
+     * kolom bank_id tunggal di tabel exams (yang cuma menunjuk 1 bank,
+     * padahal satu exam bisa menjual gabungan banyak bank).
+     *
+     * @param  \Illuminate\Support\Collection  $exams
+     * @return array<int, array{banks: array, program_ids: array}>
+     */
+    private function resolveAvailableBanks($exams): array
+    {
+        $bankIdsByExam = [];
+        $countsByExam = [];
+
+        foreach ($exams as $exam) {
+            $counts = $exam->questions()
+                ->select('questions.bank_id')
+                ->selectRaw('count(*) as cnt')
+                ->groupBy('questions.bank_id')
+                ->pluck('cnt', 'bank_id');
+
+            $bankIdsByExam[$exam->id] = $counts->keys()->filter()->values()->all();
+            $countsByExam[$exam->id] = $counts;
+        }
+
+        $allBankIds = collect($bankIdsByExam)->flatten()->unique()->values();
+
+        $banksById = \App\Models\QuestionBank::whereIn('id', $allBankIds)
+            ->get(['id', 'title', 'program_id'])
+            ->keyBy('id');
+
+        $result = [];
+
+        foreach ($bankIdsByExam as $examId => $bankIds) {
+            $banks = collect($bankIds)->map(fn ($id) => $banksById->get($id))->filter();
+
+            $result[$examId] = [
+                'banks' => $banks->map(fn ($bank) => [
+                    'id' => $bank->id,
+                    'title' => $bank->title,
+                    // Jumlah soal khusus bank ini di exam ini -- dipakai forPackage()
+                    // untuk memecah 1 exam jadi beberapa card per bank/part.
+                    'questions_count' => $countsByExam[$examId][$bank->id] ?? 0,
+                ])->values()->all(),
+                'program_ids' => $banks->pluck('program_id')->filter()->unique()->values()->all(),
+            ];
+        }
+
+        return $result;
+    }
+
+/**
      * GET /api/my-exams
      * Daftar exam yang boleh diakses siswa — reuse AccessControlService::canAttemptExam()
      * (logic sama persis dengan yang dipakai start(), supaya tidak ada 2 sumber kebenaran
@@ -138,10 +224,12 @@ class ExamController extends Controller
 
         $exams = Exam::with('bank')->withCount('questions')->get();
 
+        $bankInfo = $this->resolveAvailableBanks($exams);
+
         return $exams
-            ->filter(fn(Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
+            ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
             ->values()
-            ->map(fn(Exam $exam) => [
+            ->map(fn (Exam $exam) => [
                 'id' => $exam->id,
                 'title' => $exam->title,
                 'duration_minutes' => $exam->duration_minutes,
@@ -149,8 +237,64 @@ class ExamController extends Controller
                 'questions_count' => $exam->questions_count,
                 'is_free_preview' => $exam->is_free_preview,
                 'program_id' => $exam->bank->program_id,
-                'subject_id' => $exam->bank->subject_id,
+                'program_ids' => $bankInfo[$exam->id]['program_ids'] ?? [],
+                'available_banks' => $bankInfo[$exam->id]['banks'] ?? [],
             ]);
+    }
+
+/**
+ * GET /api/packages/{package}/exams
+ * Daftar exam yang termasuk dalam SATU package spesifik — dipakai halaman
+ * "Latihan Soal" per-package (PackageExams.jsx). Sengaja pakai relasi
+ * package->exams eksplisit (bukan lewat bank_id), supaya admin bisa
+ * memilih exam mana saja yang dijual di package ini, bahkan kalau bank
+ * soal itu punya beberapa exam lain yang tidak ikut dijual.
+ */
+public function forPackage(Request $request, \App\Models\Package $package)
+    {
+        $user = $request->user();
+
+        $exams = $package->exams()
+            ->with('bank')
+            ->withCount('questions')
+            ->get();
+
+        $bankInfo = $this->resolveAvailableBanks($exams);
+
+        return $exams
+            ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
+            ->values()
+            ->flatMap(function (Exam $exam) use ($bankInfo) {
+                $banks = $bankInfo[$exam->id]['banks'] ?? [];
+
+                // Exam lama / data belum rapi yang belum punya bank jelas --
+                // tetap tampil sebagai 1 card biasa, jangan hilang dari daftar.
+                if (empty($banks)) {
+                    return collect([[
+                        'exam_id' => $exam->id,
+                        'bank_id' => null,
+                        'title' => $exam->title,
+                        'duration_minutes' => $exam->duration_minutes,
+                        'passing_score' => $exam->passing_score,
+                        'questions_count' => $exam->questions_count,
+                        'is_free_preview' => $exam->is_free_preview,
+                    ]]);
+                }
+
+                // Satu card per bank/part (mis. Part 10, 11, 12, 13), supaya siswa
+                // langsung lihat semua part yang tersedia di package ini -- bukan
+                // 1 card gabungan yang menyembunyikan pilihan bank di balik modal.
+                return collect($banks)->map(fn ($bank) => [
+                    'exam_id' => $exam->id,
+                    'bank_id' => $bank['id'],
+                    'title' => $bank['title'],
+                    'duration_minutes' => $exam->duration_minutes,
+                    'passing_score' => $exam->passing_score,
+                    'questions_count' => $bank['questions_count'] ?? 0,
+                    'is_free_preview' => $exam->is_free_preview,
+                ]);
+            })
+            ->values();
     }
 
     /**
@@ -161,6 +305,33 @@ class ExamController extends Controller
      * Sengaja hanya melihat attempt mandiri (exam_batch_id null); attempt
      * dari try out batch punya leaderboard sendiri dan tidak dicampur di sini.
      */
+    /**
+     * GET /api/exams/{exam}/banks
+     * Daftar bank yang bisa dipilih untuk exam ini -- dipakai halaman
+     * pemilihan bank sebelum siswa mulai mengerjakan. StartExamRequest
+     * nantinya memvalidasi bank_id yang dikirim siswa terhadap daftar ini.
+     */
+    public function banks(Request $request, Exam $exam)
+    {
+        $user = $request->user();
+
+        if (!$exam->is_free_preview && !$this->accessControl->canAttemptExam($user, $exam)) {
+            return response()->json([
+                'message' => 'Anda tidak memiliki akses untuk melihat exam ini.',
+            ], 403);
+        }
+
+        $bankInfo = $this->resolveAvailableBanks(collect([$exam]));
+
+        return response()->json([
+            'exam' => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+            ],
+            'banks' => $bankInfo[$exam->id]['banks'] ?? [],
+        ]);
+    }
+
     public function summary(Request $request, Exam $exam)
     {
         $user = $request->user();
@@ -173,15 +344,18 @@ class ExamController extends Controller
 
         $exam->load('sections');
 
+        $bankId = $request->query('bank_id');
+
         $attempts = ExamAttempt::where('user_id', $user->id)
             ->where('exam_id', $exam->id)
             ->whereNull('exam_batch_id')
-            ->with('sectionScores')
+            ->when($bankId, fn ($q) => $q->where('bank_id', $bankId))
+            ->with(['sectionScores', 'bank:id,title'])
             ->orderBy('started_at')
             ->get();
 
         $inProgress = $attempts->firstWhere('status', 'in_progress');
-        $completed = $attempts->reject(fn($a) => $a->status === 'in_progress')->values();
+        $completed = $attempts->reject(fn ($a) => $a->status === 'in_progress')->values();
 
         $formatAttempt = function (ExamAttempt $attempt) use ($exam) {
             $sections = $exam->sections->map(function ($section) use ($attempt) {
@@ -197,7 +371,7 @@ class ExamController extends Controller
             });
 
             $passed = $exam->require_all_sections_pass
-                ? $sections->isNotEmpty() && $sections->every(fn($s) => $s['passed_threshold'] === true)
+                ? $sections->isNotEmpty() && $sections->every(fn ($s) => $s['passed_threshold'] === true)
                 : $attempt->score >= $exam->passing_score;
 
             return [
@@ -207,6 +381,10 @@ class ExamController extends Controller
                 'correct_count' => $attempt->correct_count,
                 'sections' => $sections->values(),
                 'passed' => $passed,
+                'bank' => $attempt->bank ? [
+                    'id' => $attempt->bank->id,
+                    'title' => $attempt->bank->title,
+                ] : null,
             ];
         };
 
@@ -217,7 +395,7 @@ class ExamController extends Controller
                 'duration_minutes' => $exam->duration_minutes,
                 'passing_score' => $exam->passing_score,
                 'is_free_preview' => $exam->is_free_preview,
-                'sections' => $exam->sections->map(fn($s) => [
+                'sections' => $exam->sections->map(fn ($s) => [
                     'code' => $s->code,
                     'name' => $s->name,
                     'min_passing_score' => $s->min_passing_score,
@@ -237,6 +415,134 @@ class ExamController extends Controller
         $this->autoSubmitIfExpired($attempt);
 
         return new ExamAttemptResource($attempt->fresh(['exam.questions.options', 'exam.sections', 'answers', 'sectionScores']));
+    }
+
+    /**
+     * GET /api/exams/{exam}/attempts
+     * Riwayat SEMUA percobaan siswa untuk exam ini (bukan cuma pertama/terbaru
+     * seperti summary()) -- dipakai halaman yang menampilkan daftar "Perolehan
+     * Nilai" per percobaan. Setiap attempt disertai breakdown skor per section,
+     * supaya tabel Pelajaran/Passing Grade/Nilai bisa dirender langsung tanpa
+     * request tambahan.
+     */
+    public function attempts(Request $request, Exam $exam)
+    {
+        $user = $request->user();
+
+        if (!$exam->is_free_preview && !$this->accessControl->canAttemptExam($user, $exam)) {
+            return response()->json([
+                'message' => 'Anda tidak memiliki akses untuk melihat exam ini.',
+            ], 403);
+        }
+
+        $exam->load('sections');
+
+        $bankId = $request->query('bank_id');
+
+        $attempts = ExamAttempt::where('user_id', $user->id)
+            ->where('exam_id', $exam->id)
+            ->whereNull('exam_batch_id')
+            ->whereIn('status', ['submitted', 'auto_submitted', 'graded'])
+            ->when($bankId, fn ($q) => $q->where('bank_id', $bankId))
+            ->with(['sectionScores', 'bank:id,title'])
+            ->orderBy('started_at')
+            ->get();
+
+        $formatAttempt = function (ExamAttempt $attempt, int $index) use ($exam) {
+            $sections = $exam->sections->map(function ($section) use ($attempt) {
+                $result = $attempt->sectionScores->firstWhere('exam_section_id', $section->id);
+
+                return [
+                    'code' => $section->code,
+                    'name' => $section->name,
+                    'raw_score' => $result?->raw_score ?? 0,
+                    'correct_count' => $result?->correct_count ?? 0,
+                    'min_passing_score' => $section->min_passing_score,
+                    'passed_threshold' => $result?->passed_threshold,
+                ];
+            });
+
+            $passed = $exam->require_all_sections_pass
+                ? $sections->isNotEmpty() && $sections->every(fn ($s) => $s['passed_threshold'] === true)
+                : $attempt->score >= $exam->passing_score;
+
+            return [
+                'attempt_id' => $attempt->id,
+                'attempt_number' => $index + 1,
+                'started_at' => $attempt->started_at,
+                'finished_at' => $attempt->finished_at,
+                'score' => $attempt->score,
+                'correct_count' => $attempt->correct_count,
+                'sections' => $sections->values(),
+                'passed' => $passed,
+                'bank' => $attempt->bank ? [
+                    'id' => $attempt->bank->id,
+                    'title' => $attempt->bank->title,
+                ] : null,
+            ];
+        };
+
+        return response()->json([
+            'exam' => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+                'passing_score' => $exam->passing_score,
+            ],
+            'attempts' => $attempts->values()->map($formatAttempt)->values(),
+        ]);
+    }
+
+    /**
+     * GET /api/exam-attempts/{attempt}/review
+     * Pembahasan lengkap per soal untuk satu attempt yang sudah selesai:
+     * teks soal, semua opsi, opsi yang dipilih siswa, opsi kunci jawaban,
+     * status benar/salah, dan teks pembahasan (questions.explanation).
+     * Hanya bisa diakses kalau attempt sudah tidak in_progress -- pembahasan
+     * tidak boleh bocor selagi siswa masih mengerjakan.
+     */
+    public function review(Request $request, ExamAttempt $attempt)
+    {
+        $this->authorizeOwnership($request, $attempt);
+
+        if ($attempt->status === 'in_progress') {
+            return response()->json([
+                'message' => 'Pembahasan hanya tersedia setelah ujian selesai.',
+            ], 422);
+        }
+
+        $attempt->load(['exam.questions.options', 'answers']);
+
+        $questions = $attempt->exam->questions->map(function ($question) use ($attempt) {
+            $answer = $attempt->answers->firstWhere('question_id', $question->id);
+            $correctOption = $question->options->firstWhere('is_correct', true);
+
+            return [
+                'question_id' => $question->id,
+                'question_text' => $question->question_text,
+                'media_type' => $question->media_type,
+                'media_url' => $question->media_url,
+                'type' => $question->type,
+                'explanation' => $question->explanation,
+                'options' => $question->options->map(fn ($opt) => [
+                    'id' => $opt->id,
+                    'option_text' => $opt->option_text,
+                    'is_correct' => $opt->is_correct,
+                ])->values(),
+                'selected_option_id' => $answer?->selected_option_id,
+                'essay_answer' => $answer?->essay_answer,
+                'correct_option_id' => $correctOption?->id,
+                'is_correct' => $answer?->is_correct,
+                'needs_manual_grading' => $answer?->needs_manual_grading ?? false,
+            ];
+        });
+
+        return response()->json([
+            'attempt_id' => $attempt->id,
+            'exam_title' => $attempt->exam->title,
+            'score' => $attempt->score,
+            'correct_count' => $attempt->correct_count,
+            'questions' => $questions->values(),
+        ]);
     }
 
     /**
@@ -262,6 +568,19 @@ class ExamController extends Controller
         }
 
         $data = $request->validated();
+
+        if ($attempt->exam->uses_section_timers && $attempt->current_section_id) {
+            $pivot = $attempt->exam->questions()
+                ->where('questions.id', $data['question_id'])
+                ->first()?->pivot;
+
+            if ($pivot && (int) $pivot->exam_section_id !== (int) $attempt->current_section_id) {
+                return response()->json([
+                    'message' => 'Soal ini bukan bagian dari bagian ujian yang sedang aktif.',
+                ], 422);
+            }
+        }
+
         $isEssay = array_key_exists('essay_answer', $data) && $data['essay_answer'] !== null;
 
         $attempt->answers()->updateOrCreate(
@@ -320,10 +639,80 @@ class ExamController extends Controller
      * Cek waktu habis (started_at + exam.duration_minutes), terpisah dari
      * validasi window exam_batch. True kalau baru saja / sudah auto_submitted.
      */
+    /**
+     * Mode timer per-section (TOEFL-style): cek apakah waktu section yang
+     * SEDANG AKTIF sudah habis. Kalau habis, section itu otomatis ditutup
+     * (soal yang belum dijawab dianggap kosong/salah -- tidak ada aksi
+     * khusus perlu ditulis di sini, karena gradeAndClose() sudah menghitung
+     * skor cuma dari jawaban yang tersimpan) dan attempt dimajukan ke
+     * section berikutnya sesuai `order`. Di-loop supaya kalau siswa lama
+     * tidak membuka halaman, beberapa section yang sudah lewat sekaligus
+     * tetap dimajukan satu-satu sampai section aktif ketemu yang valid,
+     * atau exam otomatis selesai kalau section terakhir juga sudah habis.
+     * Tidak melakukan apa-apa untuk exam bertipe timer global (CPNS-style).
+     */
+    protected function checkAndAdvanceSection(ExamAttempt $attempt): void
+    {
+        if (!$attempt->exam->uses_section_timers || $attempt->status !== 'in_progress') {
+            return;
+        }
+
+        $sections = $attempt->exam->sections()->orderBy('order')->get();
+        if ($sections->isEmpty()) {
+            return;
+        }
+
+        // Attempt lama sebelum fitur ini ada / edge case belum punya section
+        // aktif -- set ke section pertama supaya tidak error di bawah.
+        if (!$attempt->current_section_id) {
+            $attempt->update([
+                'current_section_id' => $sections->first()->id,
+                'section_started_at' => $attempt->section_started_at ?? now(),
+            ]);
+        }
+
+        while ($attempt->status === 'in_progress') {
+            $currentSection = $sections->firstWhere('id', $attempt->current_section_id);
+
+            if (!$currentSection || !$currentSection->duration_minutes) {
+                return; // section tanpa durasi diatur -- anggap tidak dibatasi timer
+            }
+
+            $sectionDeadline = $attempt->section_started_at->clone()->addMinutes($currentSection->duration_minutes);
+
+            if (now()->lessThanOrEqualTo($sectionDeadline)) {
+                return; // section aktif masih dalam waktu
+            }
+
+            $nextSection = $sections->where('order', '>', $currentSection->order)->sortBy('order')->first();
+
+            if ($nextSection) {
+                // section_started_at baru dihitung persis dari deadline section
+                // sebelumnya (bukan now()), supaya siswa tidak "untung" dapat
+                // waktu tambahan gara-gara server sempat delay memprosesnya.
+                $attempt->update([
+                    'current_section_id' => $nextSection->id,
+                    'section_started_at' => $sectionDeadline,
+                ]);
+            } else {
+                // Section terakhir sudah habis waktunya -- seluruh exam selesai.
+                $this->gradeAndClose($attempt, 'auto_submitted');
+
+                return;
+            }
+        }
+    }
+
     protected function autoSubmitIfExpired(ExamAttempt $attempt): bool
     {
         if ($attempt->status !== 'in_progress') {
             return in_array($attempt->status, ['auto_submitted', 'graded']);
+        }
+
+        $this->checkAndAdvanceSection($attempt);
+
+        if ($attempt->status !== 'in_progress') {
+            return true;
         }
 
         $deadline = $attempt->started_at->clone()->addMinutes($attempt->exam->duration_minutes);
@@ -391,10 +780,22 @@ class ExamController extends Controller
                     continue;
                 }
 
-                // soal pg: baca points langsung dari opsi yang dipilih siswa
+                // soal pg: cabang berbeda tergantung scoring_type section.
+                // - weighted_options (TKP): tiap opsi punya points sendiri (1-5),
+                //   tidak ada "salah" -- selectedOption->points dipakai langsung.
+                // - single_correct (TWK/TIU, default): opsi benar dicek via
+                //   is_correct, poin diambil dari bobot soal di pivot exam_questions,
+                //   fallback 1 poin kalau bobot belum diisi.
                 $selectedOption = $answer->question->options->firstWhere('id', $answer->selected_option_id);
-                $points = $selectedOption->points ?? 0;
-                $isCorrect = (bool) ($selectedOption->is_correct ?? false);
+                $scoringType = $sections->get($sectionId)?->scoring_type;
+
+                if ($scoringType === 'weighted_options') {
+                    $points = $selectedOption->points ?? 0;
+                    $isCorrect = $points > 0;
+                } else {
+                    $isCorrect = (bool) ($selectedOption->is_correct ?? false);
+                    $points = $isCorrect ? ($pivot->points ?? 1) : 0;
+                }
 
                 $answer->update(['is_correct' => $isCorrect]);
 

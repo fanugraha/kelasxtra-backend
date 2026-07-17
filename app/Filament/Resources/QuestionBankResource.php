@@ -3,7 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\QuestionBankResource\Pages;
-use App\Filament\Resources\QuestionBankResource\RelationManagers\QuestionsRelationManager;
+use App\Filament\Resources\QuestionResource\RelationManagers\QuestionsRelationManager;
 use App\Models\QuestionBank;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;

@@ -15,8 +15,8 @@
                     <a href="{{ url('/artikel/'.$article->slug) }}"
                        class="block rounded-xl border border-neutral-100 overflow-hidden hover:shadow-md transition">
                         <div class="h-40 bg-neutral-100">
-                            @if ($article->thumbnail)
-                                <img src="{{ $article->thumbnail }}" alt="{{ $article->title }}"
+                            @if ($article->thumbnail_url)
+                                <img src="{{ $article->thumbnail_url }}" alt="{{ $article->title }}"
                                      class="w-full h-full object-cover" loading="lazy">
                             @endif
                         </div>

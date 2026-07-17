@@ -95,7 +95,9 @@ class MidtransCallbackController extends Controller
                         'transaction_id' => $transaction->id,
                         'status' => 'active',
                         'start_date' => now(),
-                        'end_date' => now()->addDays($transaction->package->duration_days ?? 30),
+                        'end_date' => $transaction->package->duration_days
+    ? now()->addDays($transaction->package->duration_days)
+    : null,
                     ]
                 );
 

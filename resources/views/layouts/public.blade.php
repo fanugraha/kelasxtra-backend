@@ -5,16 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     {{-- ==================== SEO META TAGS ==================== --}}
-    <title>{{ $metaTitle ?? 'Kelasxtra — Try Out, Kelas, dan Latihan Soal SNBT, CPNS, BUMN' }}</title>
+    <title>{{ $metaTitle ?? 'Xtracademy — Try Out, Kelas, dan Latihan Soal SNBT, CPNS, BUMN' }}</title>
     <meta name="description" content="{{ $metaDescription ?? 'Try out, kelas, dan pembahasan soal untuk SNBT, CPNS/SKD, BUMN, dan Ujian Mandiri.' }}">
     <link rel="canonical" href="{{ url()->current() }}">
 
     {{-- Open Graph / social share --}}
     <meta property="og:type" content="website">
-    <meta property="og:title" content="{{ $metaTitle ?? 'Kelasxtra' }}">
+    <meta property="og:title" content="{{ $metaTitle ?? 'Xtracademy' }}">
     <meta property="og:description" content="{{ $metaDescription ?? '' }}">
     <meta property="og:url" content="{{ url()->current() }}">
-    <meta property="og:site_name" content="Kelasxtra">
+    <meta property="og:site_name" content="Xtracademy">
     @isset($ogImage)
         <meta property="og:image" content="{{ $ogImage }}">
     @endisset
@@ -64,7 +64,7 @@
     {{-- Header sederhana, sama seperti versi React --}}
     <header class="sticky top-0 z-40 bg-brand-600 text-white">
         <div class="max-w-6xl mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
-            <a href="{{ url('/') }}" class="font-bold text-lg">Kelasxtra</a>
+            <a href="{{ url('/') }}" class="font-bold text-lg">Xtracademy</a>
             <nav class="hidden md:flex items-center gap-6 text-sm font-medium">
                 <a href="{{ url('/artikel') }}" class="hover:text-brand-100">Artikel</a>
                 <a href="{{ url('/#paket') }}" class="hover:text-brand-100">Paket Belajar</a>
@@ -82,7 +82,7 @@
 
     <footer class="bg-brand-700 text-brand-100 py-10 mt-16">
         <div class="max-w-6xl mx-auto px-4 md:px-6 text-sm flex flex-col md:flex-row justify-between gap-4">
-            <p>&copy; {{ date('Y') }} Kelasxtra. Semua hak dilindungi.</p>
+            <p>&copy; {{ date('Y') }} Xtracademy. Semua hak dilindungi.</p>
             <div class="flex gap-4">
                 <a href="{{ url('/artikel') }}" class="hover:text-white">Artikel</a>
                 <a href="{{ url('/login') }}" class="hover:text-white">Masuk</a>

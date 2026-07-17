@@ -12,16 +12,39 @@ class ExamAttemptResource extends JsonResource
         $deadline = $this->started_at?->clone()->addMinutes($this->exam->duration_minutes);
         $remainingSeconds = $deadline ? max(0, now()->diffInSeconds($deadline, false)) : null;
 
+        // Mode timer per-section (TOEFL-style): section aktif + sisa waktunya.
+        // currentSection() di-load lazy di sini -- aman karena cuma dipanggil
+        // 1x per attempt, bukan di dalam loop/collection besar.
+        $usesSectionTimers = (bool) $this->exam->uses_section_timers;
+        $currentSection = $usesSectionTimers ? $this->currentSection : null;
+        $sectionDeadline = ($currentSection && $this->section_started_at && $currentSection->duration_minutes)
+            ? $this->section_started_at->clone()->addMinutes($currentSection->duration_minutes)
+            : null;
+        $sectionRemainingSeconds = $sectionDeadline ? max(0, now()->diffInSeconds($sectionDeadline, false)) : null;
+
         return [
             'id' => $this->id,
             'exam_id' => $this->exam_id,
             'exam_batch_id' => $this->exam_batch_id,
+            'bank_id' => $this->bank_id,
             'status' => $this->status,
             'started_at' => $this->started_at,
             'finished_at' => $this->finished_at,
             'duration_minutes' => $this->exam->duration_minutes,
             'passing_score' => $this->exam->passing_score,
             'remaining_seconds' => $this->status === 'in_progress' ? $remainingSeconds : 0,
+            'uses_section_timers' => $usesSectionTimers,
+            'current_section' => $this->when(
+                $this->status === 'in_progress' && $usesSectionTimers,
+                fn () => $currentSection ? [
+                    'id' => $currentSection->id,
+                    'code' => $currentSection->code,
+                    'name' => $currentSection->name,
+                    'order' => $currentSection->order,
+                    'duration_minutes' => $currentSection->duration_minutes,
+                    'remaining_seconds' => $sectionRemainingSeconds,
+                ] : null
+            ),
             'tab_switch_count' => $this->tab_switch_count,
             'question_order' => $this->when(
                 $this->status === 'in_progress',
@@ -32,7 +55,15 @@ class ExamAttemptResource extends JsonResource
             // category: null untuk soal lama yang belum dikategorikan (mis. testing awal).
             'questions' => $this->when(
                 $this->status === 'in_progress',
-                fn () => $this->exam->questions->map(fn ($q) => [
+                fn () => $this->exam->questions
+                    // Mode section timer: siswa cuma boleh lihat soal di section
+                    // yang lagi aktif. Kalau pivot exam_section_id null (data lama
+                    // yang belum di-assign section), soal itu ikut disembunyikan
+                    // saat mode ini aktif -- aman daripada bocor ke section salah.
+                    ->when($usesSectionTimers, fn ($qs) => $qs->filter(
+                        fn ($q) => ($q->pivot->exam_section_id ?? null) === $this->current_section_id
+                    ))
+                    ->map(fn ($q) => [
                     'id' => $q->id,
                     'question_text' => $q->question_text,
                     'image_url' => $q->image_url,
@@ -44,7 +75,7 @@ class ExamAttemptResource extends JsonResource
                             'option_text' => $o->option_text,
                         ])
                         : [],
-                ])
+                ])->values()
             ),
             // BARU: jawaban yang sudah tersimpan, supaya tidak hilang saat attempt di-reload.
             // Format eksplisit question_id (bukan key array/object) — hindari masalah
@@ -80,6 +111,29 @@ class ExamAttemptResource extends JsonResource
                     ];
                 })
             ),
+            // BARU: status lulus final, dihitung backend supaya konsisten di
+            // semua tempat (bukan ditebak frontend). null = exam ini tidak
+            // punya aturan kelulusan (Tipe 3), true/false = lulus/tidak (Tipe 1/2).
+            'passed' => $this->when($this->status !== 'in_progress', function () {
+                $exam = $this->exam;
+
+                if ($exam->require_all_sections_pass) {
+                    $sections = $exam->sections;
+                    if ($sections->isEmpty()) {
+                        return null;
+                    }
+                    return $sections->every(function ($section) {
+                        $result = $this->sectionScores->firstWhere('exam_section_id', $section->id);
+                        return $result?->passed_threshold === true;
+                    });
+                }
+
+                if ($exam->passing_score !== null) {
+                    return $this->score >= $exam->passing_score;
+                }
+
+                return null;
+            }),
             'has_pending_essay' => $this->when(
                 in_array($this->status, ['submitted', 'auto_submitted']),
                 fn () => $this->answers()->where('needs_manual_grading', true)->exists()

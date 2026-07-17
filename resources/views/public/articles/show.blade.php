@@ -8,12 +8,12 @@
         "@type": "Article",
         "headline": {{ Illuminate\Support\Js::from($article->title) }},
         "datePublished": "{{ $article->published_at?->toIso8601String() }}",
-        @if($article->thumbnail)
-        "image": {{ Illuminate\Support\Js::from($article->thumbnail) }},
+        @if($article->thumbnail_url)
+        "image": {{ Illuminate\Support\Js::from($article->thumbnail_url) }},
         @endif
         "publisher": {
             "@type": "Organization",
-            "name": "Kelasxtra"
+            "name": "Xtracademy"
         }
     }
     </script>
@@ -25,8 +25,8 @@
             ← Kembali ke daftar artikel
         </a>
 
-        @if ($article->thumbnail)
-            <img src="{{ $article->thumbnail }}" alt="{{ $article->title }}"
+        @if ($article->thumbnail_url)
+            <img src="{{ $article->thumbnail_url }}" alt="{{ $article->title }}"
                  class="w-full h-64 object-cover rounded-xl mb-6">
         @endif
 
@@ -42,7 +42,7 @@
         @endif
 
         <div class="prose max-w-none text-neutral-700 whitespace-pre-line">
-            {{ $article->content }}
+            {!! $article->content !!}
         </div>
     </div>
 @endsection
