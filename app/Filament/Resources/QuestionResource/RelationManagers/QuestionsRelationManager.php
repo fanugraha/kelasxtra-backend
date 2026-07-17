@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Filament\Resources\QuestionBankResource\RelationManagers;
+namespace App\Filament\Resources\QuestionResource\RelationManagers;
 
 use Filament\Actions\CreateAction;
 use Filament\Actions\ImportAction;

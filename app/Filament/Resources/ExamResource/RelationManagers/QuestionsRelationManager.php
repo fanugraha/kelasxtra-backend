@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ExamResource\RelationManagers;
 
 use App\Filament\Imports\QuestionImporter;
+use Filament\Actions\Action;
 use Filament\Actions\AttachAction;
 use Filament\Actions\DetachAction;
 use Filament\Actions\DetachBulkAction;
@@ -12,8 +13,10 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Notifications\Notification;
 use Filament\Tables\Table;
 
 /**
@@ -59,6 +62,45 @@ class QuestionsRelationManager extends RelationManager
                     ->formatStateUsing(fn ($state) => $this->getOwnerRecord()->sections()->find($state)?->name ?? '-'),
             ])
             ->headerActions([
+                Action::make('assignSectionFromCategory')
+                    ->label('Assign Section dari Kategori')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalDescription('Mengisi otomatis "Bagian Ujian" untuk soal yang belum punya section, dicocokkan dari kategori masing-masing soal ke section exam ini. Soal dengan kategori yang belum punya section di exam ini akan dilewati (tetap kosong).')
+                    ->action(function () {
+                        $exam = $this->getOwnerRecord();
+
+                        $sectionByCategory = $exam->sections()->get(['id', 'category_id'])->keyBy('category_id');
+
+                        $unassigned = $exam->questions()
+                            ->wherePivotNull('exam_section_id')
+                            ->get(['questions.id', 'questions.category_id']);
+
+                        $updated = 0;
+                        $skipped = 0;
+
+                        foreach ($unassigned as $question) {
+                            $sectionId = $question->category_id
+                                ? $sectionByCategory->get($question->category_id)?->id
+                                : null;
+
+                            if ($sectionId) {
+                                $exam->questions()->updateExistingPivot($question->id, [
+                                    'exam_section_id' => $sectionId,
+                                ]);
+                                $updated++;
+                            } else {
+                                $skipped++;
+                            }
+                        }
+
+                        Notification::make()
+                            ->title($updated > 0
+                                ? "{$updated} soal berhasil di-assign ke section." . ($skipped > 0 ? " {$skipped} soal dilewati (kategori belum punya section)." : '')
+                                : 'Tidak ada soal yang perlu di-assign, atau kategorinya belum punya section di exam ini.')
+                            ->success()
+                            ->send();
+                    }),
                 ImportAction::make()
                     ->label('Import Soal Baru')
                     ->importer(QuestionImporter::class)
@@ -83,7 +125,35 @@ class QuestionsRelationManager extends RelationManager
                 DetachAction::make(),
             ])
             ->toolbarActions([
-                BulkActionGroup::make([DetachBulkAction::make()]),
+                BulkActionGroup::make([
+                    BulkAction::make('setPointsMassal')
+                        ->label('Set Poin Massal')
+                        ->color('warning')
+                        ->schema([
+                            TextInput::make('points')
+                                ->label('Poin per Soal')
+                                ->numeric()
+                                ->required()
+                                ->minValue(0)
+                                ->helperText('Semua soal yang dicentang akan diubah ke poin ini (mis. 5 untuk TWK/TIU standar SKD).'),
+                        ])
+                        ->action(function (array $data, \Illuminate\Database\Eloquent\Collection $records) {
+                            $exam = $this->getOwnerRecord();
+
+                            foreach ($records as $question) {
+                                $exam->questions()->updateExistingPivot($question->id, [
+                                    'points' => $data['points'],
+                                ]);
+                            }
+
+                            \Filament\Notifications\Notification::make()
+                                ->title(count($records) . ' soal berhasil di-set ke ' . $data['points'] . ' poin.')
+                                ->success()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion(),
+                    DetachBulkAction::make(),
+                ]),
             ]);
     }
 }

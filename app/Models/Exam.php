@@ -19,6 +19,7 @@ class Exam extends Model
         'passing_score',
         'require_all_sections_pass',
         'is_free_preview',
+        'uses_section_timers',
     ];
 
     protected function casts(): array
@@ -26,7 +27,7 @@ class Exam extends Model
         return [
             'is_free_preview' => 'boolean',
             'require_all_sections_pass' => 'boolean',
-
+            'uses_section_timers' => 'boolean',
         ];
     }
 

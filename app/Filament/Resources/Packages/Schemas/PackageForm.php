@@ -3,10 +3,13 @@
 namespace App\Filament\Resources\Packages\Schemas;
 
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Forms\Components\FileUpload;
+use Illuminate\Support\Facades\Storage;
 use App\Models\Exam;
 
 class PackageForm
@@ -69,11 +72,50 @@ class PackageForm
                 TextInput::make('discount_price')
                     ->numeric()
                     ->prefix('Rp'),
-                TextInput::make('duration_days')
-                    ->required()
-                    ->numeric(),
+                Toggle::make('is_lifetime')
+    ->label('Akses Selamanya (Lifetime)')
+    ->live()
+    ->dehydrated(false)
+    ->afterStateHydrated(function (Toggle $component, $record) {
+        if ($record) {
+            $component->state(blank($record->duration_days));
+        }
+    })
+    ->helperText('Aktifkan jika paket ini tidak punya batas waktu akses (tidak akan expired).'),
+TextInput::make('duration_days')
+    ->label('Durasi Akses (hari)')
+    ->numeric()
+    ->minValue(1)
+    ->visible(fn (Get $get) => ! $get('is_lifetime'))
+    ->required(fn (Get $get) => ! $get('is_lifetime'))
+    ->dehydrateStateUsing(fn (Get $get, $state) => $get('is_lifetime') ? null : $state)
+    ->helperText('Kosongkan / aktifkan toggle di atas untuk akses selamanya.'),
                 Textarea::make('description')
                     ->columnSpanFull(),
+                FileUpload::make('banner_image_url')
+                    ->label('Banner Paket')
+                    ->image()
+                    ->imageEditor()
+                    ->disk('public')
+                    ->directory('packages/banners')
+                    ->visibility('public')
+                    ->maxSize(2048)
+                    ->columnSpanFull()
+                    ->helperText('Gambar banner untuk card paket.')
+                    ->afterStateHydrated(function (FileUpload $component, $state) {
+                        if ($state && str_starts_with($state, 'http')) {
+                            $path = parse_url($state, PHP_URL_PATH);
+                            $relative = preg_replace('#^/storage/#', '', $path);
+                            $component->state($relative);
+                        }
+                    })
+                    ->dehydrateStateUsing(function ($state) {
+                        if (! $state) {
+                            return null;
+                        }
+                        $path = is_array($state) ? reset($state) : $state;
+                        return Storage::disk('public')->url($path);
+                    }),
             ]);
     }
 }

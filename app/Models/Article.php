@@ -9,7 +9,7 @@ class Article extends Model
     protected $fillable = [
         'title',
         'slug',
-        'thumbnail',
+        'thumbnail_url',
         'author_id',
         'excerpt',
         'content',
@@ -26,9 +26,20 @@ class Article extends Model
         return $this->belongsTo(Program::class);
     }
 
+    public function author()
+    {
+        return $this->belongsTo(User::class, 'author_id');
+    }
+
     public function scopePublished($query)
     {
         return $query->whereNotNull('published_at')
             ->where('published_at', '<=', now());
     }
+protected function thumbnailUrl(): \Illuminate\Database\Eloquent\Casts\Attribute
+{
+    return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+        get: fn ($value) => $value ? asset('storage/' . $value) : null,
+    );
+}
 }

@@ -23,6 +23,8 @@ class ExamAttempt extends Model
         'status',
         'question_order',
         'tab_switch_count',
+        'current_section_id',
+        'section_started_at',
     ];
 
     protected function casts(): array
@@ -30,6 +32,7 @@ class ExamAttempt extends Model
         return [
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
+            'section_started_at' => 'datetime',
             // Urutan soal & opsi hasil randomisasi, disimpan sebagai array supaya
             // konsisten kalau siswa reload halaman (lihat AGENTS: exam engine).
             'question_order' => 'array',
@@ -106,5 +109,10 @@ class ExamAttempt extends Model
     public function sectionScores(): HasMany
     {
         return $this->hasMany(ExamAttemptSectionScore::class);
+    }
+
+    public function currentSection(): BelongsTo
+    {
+        return $this->belongsTo(ExamSection::class, 'current_section_id');
     }
 }

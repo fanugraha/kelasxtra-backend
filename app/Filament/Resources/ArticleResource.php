@@ -8,6 +8,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\RichEditor;
@@ -47,10 +48,24 @@ class ArticleResource extends Resource
                 ->required()
                 ->searchable()
                 ->preload(),
-            FileUpload::make('thumbnail')->image()->directory('article-thumbnails'),
+            FileUpload::make('thumbnail_url')
+    ->image()
+    ->disk('public')
+    ->visibility('public')
+    ->directory('article-thumbnails')
+    ->maxSize(2048)
+    ->validationMessages([
+        'max' => 'Ukuran file maksimal 2 MB.',
+    ]),
             RichEditor::make('content')->required()->columnSpanFull(),
             DateTimePicker::make('published_at')
-                ->helperText('Kosongkan kalau masih draft (belum tayang).'),
+                ->helperText('Kosongkan kalau masih draft (belum tayang).')
+                ->suffixAction(
+                    Action::make('publishNow')
+                        ->label('Publish Now')
+                        ->icon('heroicon-m-bolt')
+                        ->action(fn (callable $set) => $set('published_at', now()))
+                ),
         ]);
     }
 
