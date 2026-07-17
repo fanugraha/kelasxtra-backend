@@ -2,15 +2,10 @@
 
 namespace App\Services;
 
-use App\Models\Enrollment;
 use App\Models\Package;
 use App\Models\Promo;
 use App\Models\Transaction;
-use App\Models\TransactionLog;
 use App\Models\User;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Midtrans\Config;
 use Midtrans\Snap;
@@ -76,58 +71,6 @@ class MidtransService
         return $transaction;
     }
 
-    public function handleCallback(array $payload): void
-    {
-        $orderId = $payload['order_id'] ?? null;
-
-        if (!$orderId) {
-            Log::warning('Midtrans callback tanpa order_id.', $payload);
-            return;
-        }
-
-        $transaction = Transaction::where('midtrans_order_id', $orderId)->first();
-
-        if (!$transaction) {
-            Log::warning('Midtrans callback untuk order_id yang tidak dikenal.', ['order_id' => $orderId]);
-            return;
-        }
-
-        if (!$this->isSignatureValid($payload, $transaction)) {
-            Log::warning('Midtrans callback signature tidak valid.', ['order_id' => $orderId]);
-            return;
-        }
-
-        TransactionLog::create([
-            'transaction_id' => $transaction->id,
-            'raw_payload' => $payload,
-        ]);
-
-        if (in_array($transaction->status, ['success', 'failed', 'expired'], true)) {
-            return;
-        }
-
-        $newStatus = $this->mapMidtransStatus(
-            $payload['transaction_status'] ?? null,
-            $payload['fraud_status'] ?? null,
-        );
-
-        if ($newStatus === null) {
-            return;
-        }
-
-        DB::transaction(function () use ($transaction, $newStatus, $payload) {
-            $transaction->update([
-                'status' => $newStatus,
-                'payment_method' => $payload['payment_type'] ?? $transaction->payment_method,
-                'paid_at' => $newStatus === 'success' ? now() : $transaction->paid_at,
-            ]);
-
-            if ($newStatus === 'success') {
-                $this->activateEnrollment($transaction);
-            }
-        });
-    }
-
     /**
      * Generate ulang Snap token untuk transaksi pending. Midtrans MENOLAK
      * generate token baru dengan order_id yang sudah pernah dipakai
@@ -164,50 +107,6 @@ class MidtransService
                 ]
             ],
         ]);
-    }
-
-    protected function activateEnrollment(Transaction $transaction): void
-    {
-        $package = $transaction->package;
-        $endDate = $package->duration_days
-            ? Carbon::today()->addDays($package->duration_days)
-            : null;
-
-        Enrollment::updateOrCreate(
-            ['transaction_id' => $transaction->id],
-            [
-                'user_id' => $transaction->user_id,
-                'package_id' => $transaction->package_id,
-                'status' => 'active',
-                'start_date' => Carbon::today(),
-                'end_date' => $endDate,
-            ]
-        );
-    }
-
-    protected function mapMidtransStatus(?string $transactionStatus, ?string $fraudStatus): ?string
-    {
-        return match ($transactionStatus) {
-            'capture' => $fraudStatus === 'accept' ? 'success' : ($fraudStatus === 'challenge' ? null : 'failed'),
-            'settlement' => 'success',
-            'deny' => 'failed',
-            'cancel' => 'failed',
-            'expire' => 'expired',
-            'pending' => null,
-            default => null,
-        };
-    }
-
-    protected function isSignatureValid(array $payload, Transaction $transaction): bool
-    {
-        $orderId = $payload['order_id'] ?? '';
-        $statusCode = $payload['status_code'] ?? '';
-        $grossAmount = $payload['gross_amount'] ?? '';
-        $signatureKey = $payload['signature_key'] ?? '';
-
-        $expected = hash('sha512', $orderId.$statusCode.$grossAmount.Config::$serverKey);
-
-        return hash_equals($expected, $signatureKey);
     }
 
     protected function generateOrderId(Package $package): string

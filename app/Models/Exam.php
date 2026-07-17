@@ -36,14 +36,14 @@ class Exam extends Model
     }
 
     public function sections(): HasMany
-{
-    return $this->hasMany(ExamSection::class);
-}
+    {
+        return $this->hasMany(ExamSection::class);
+    }
 
     public function questions(): BelongsToMany
     {
         return $this->belongsToMany(Question::class, 'exam_questions')
-            ->withPivot(['points', 'exam_section_id']);
+            ->withPivot('points');
     }
 
     public function batches(): HasMany

@@ -9,6 +9,7 @@ use App\Models\QuestionBank;
 use App\Models\QuestionPassage;
 use Filament\Actions\Imports\ImportColumn;
 use Filament\Actions\Imports\Importer;
+use Filament\Actions\Imports\Exceptions\RowImportFailedException;
 use Filament\Actions\Imports\Models\Import;
 use Filament\Forms\Components\Select;
 use Illuminate\Support\Number;
@@ -16,6 +17,14 @@ use Illuminate\Support\Number;
 class QuestionImporter extends Importer
 {
     protected static ?string $model = Question::class;
+
+    /**
+     * Nilai yang dikenali sebagai TRUE/FALSE untuk kolom correct_X.
+     * Kalau isi kolom tidak masuk salah satu list ini (dan tidak kosong),
+     * baris ditolak -- supaya salah ketik tidak diam-diam dianggap "salah".
+     */
+    protected const TRUE_VALUES = ['1', 'true', 'ya', 'yes', 'benar'];
+    protected const FALSE_VALUES = ['0', 'false', 'tidak', 'no', 'salah'];
 
     public static function getColumns(): array
     {
@@ -59,6 +68,11 @@ class QuestionImporter extends Importer
                 ->label('URL Media (opsional)')
                 ->rules(['nullable', 'max:255']),
 
+            ImportColumn::make('explanation')
+                ->label('Pembahasan (opsional)')
+                ->rules(['nullable'])
+                ->example('Karena proses fotosintesis menghasilkan oksigen dan glukosa dari CO2 + air.'),
+
             ImportColumn::make('points')
                 ->label('Poin Soal Ini di Exam (opsional)')
                 ->rules(['nullable', 'numeric'])
@@ -66,15 +80,24 @@ class QuestionImporter extends Importer
                 ->example('5'),
 
             ImportColumn::make('option_1')->label('Opsi 1')->fillRecordUsing(fn () => null)->example('Oxygen and glucose'),
-            ImportColumn::make('correct_1')->label('Opsi 1 Benar? (1/0)')->fillRecordUsing(fn () => null)->example('1'),
+            ImportColumn::make('correct_1')->label('Opsi 1 Benar? (1/0, kosongkan utk TKP)')->fillRecordUsing(fn () => null)->example('1'),
+            ImportColumn::make('points_1')->label('Opsi 1 Poin (khusus TKP, 1-5)')->fillRecordUsing(fn () => null)->example('5'),
+
             ImportColumn::make('option_2')->label('Opsi 2')->fillRecordUsing(fn () => null)->example('Nitrogen and water'),
-            ImportColumn::make('correct_2')->label('Opsi 2 Benar? (1/0)')->fillRecordUsing(fn () => null)->example('0'),
+            ImportColumn::make('correct_2')->label('Opsi 2 Benar? (1/0, kosongkan utk TKP)')->fillRecordUsing(fn () => null)->example('0'),
+            ImportColumn::make('points_2')->label('Opsi 2 Poin (khusus TKP, 1-5)')->fillRecordUsing(fn () => null),
+
             ImportColumn::make('option_3')->label('Opsi 3')->fillRecordUsing(fn () => null),
-            ImportColumn::make('correct_3')->label('Opsi 3 Benar? (1/0)')->fillRecordUsing(fn () => null),
+            ImportColumn::make('correct_3')->label('Opsi 3 Benar? (1/0, kosongkan utk TKP)')->fillRecordUsing(fn () => null),
+            ImportColumn::make('points_3')->label('Opsi 3 Poin (khusus TKP, 1-5)')->fillRecordUsing(fn () => null),
+
             ImportColumn::make('option_4')->label('Opsi 4')->fillRecordUsing(fn () => null),
-            ImportColumn::make('correct_4')->label('Opsi 4 Benar? (1/0)')->fillRecordUsing(fn () => null),
+            ImportColumn::make('correct_4')->label('Opsi 4 Benar? (1/0, kosongkan utk TKP)')->fillRecordUsing(fn () => null),
+            ImportColumn::make('points_4')->label('Opsi 4 Poin (khusus TKP, 1-5)')->fillRecordUsing(fn () => null),
+
             ImportColumn::make('option_5')->label('Opsi 5')->fillRecordUsing(fn () => null),
-            ImportColumn::make('correct_5')->label('Opsi 5 Benar? (1/0)')->fillRecordUsing(fn () => null),
+            ImportColumn::make('correct_5')->label('Opsi 5 Benar? (1/0, kosongkan utk TKP)')->fillRecordUsing(fn () => null),
+            ImportColumn::make('points_5')->label('Opsi 5 Poin (khusus TKP, 1-5)')->fillRecordUsing(fn () => null),
         ];
     }
 
@@ -181,8 +204,99 @@ class QuestionImporter extends Importer
     protected function beforeCreate(): void
     {
         if (empty($this->getBankId())) {
-            throw new \Filament\Actions\Imports\Exceptions\RowImportFailedException(
+            throw new RowImportFailedException(
                 'Bank Soal tidak diketahui. Pilih "Bank Soal (sumber)" di form sebelum import, atau jalankan import ini dari dalam halaman Bank Soal.'
+            );
+        }
+
+        // Validasi opsi jawaban dilakukan SEBELUM record disimpan, supaya baris
+        // yang gagal validasi tidak sempat membuat row Question yatim tanpa opsi.
+        if ($this->data['type'] === 'pg') {
+            $this->validateOptionsOrFail();
+        }
+    }
+
+    /**
+     * Parse nilai correct_X secara ketat. Mengembalikan:
+     * - true  : kalau nilai ada di TRUE_VALUES
+     * - false : kalau nilai kosong ATAU ada di FALSE_VALUES
+     * - null  : kalau nilai TERISI tapi tidak dikenali sama sekali (baris harus ditolak)
+     */
+    protected function parseCorrectFlag(string $rawValue): ?bool
+    {
+        $normalized = strtolower(trim($rawValue));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (in_array($normalized, self::TRUE_VALUES, true)) {
+            return true;
+        }
+
+        if (in_array($normalized, self::FALSE_VALUES, true)) {
+            return false;
+        }
+
+        return null;
+    }
+
+    /**
+     * Cek kelengkapan & konsistensi opsi jawaban SEBELUM soal disimpan.
+     * Aturan:
+     * 1. Minimal 2 opsi (option_text) harus terisi.
+     * 2. Kalau ADA kolom points_X yang diisi untuk opsi manapun (mode TKP/bobot),
+     *    tidak wajib ada opsi "benar" -- karena scoring-nya berbasis poin per opsi,
+     *    bukan benar/salah.
+     * 3. Kalau TIDAK ada points_X sama sekali (mode PG biasa), wajib ada MINIMAL
+     *    1 opsi yang ditandai benar (correct_X terisi valid true).
+     * 4. correct_X yang terisi tapi nilainya tidak dikenali (bukan 1/0/ya/tidak/dst)
+     *    membuat baris ditolak, supaya salah ketik tidak lolos diam-diam.
+     */
+    protected function validateOptionsOrFail(): void
+    {
+        $filledCount = 0;
+        $hasAnyCorrect = false;
+        $hasAnyPoints = false;
+
+        for ($i = 1; $i <= 5; $i++) {
+            $optionText = trim((string) ($this->data["option_{$i}"] ?? ''));
+
+            if ($optionText === '') {
+                continue;
+            }
+
+            $filledCount++;
+
+            $correctRaw = (string) ($this->data["correct_{$i}"] ?? '');
+            $pointsRaw = trim((string) ($this->data["points_{$i}"] ?? ''));
+
+            if ($pointsRaw !== '') {
+                $hasAnyPoints = true;
+            }
+
+            $parsedCorrect = $this->parseCorrectFlag($correctRaw);
+
+            if ($parsedCorrect === null) {
+                throw new RowImportFailedException(
+                    "Nilai kolom correct_{$i} = \"{$correctRaw}\" tidak dikenali. Gunakan 1/0, ya/tidak, atau benar/salah. Kosongkan kolom ini kalau soal ini pakai mode poin (TKP)."
+                );
+            }
+
+            if ($parsedCorrect === true) {
+                $hasAnyCorrect = true;
+            }
+        }
+
+        if ($filledCount < 2) {
+            throw new RowImportFailedException(
+                "Soal Pilihan Ganda wajib punya minimal 2 opsi jawaban terisi (option_1, option_2, dst). Baris ini hanya punya {$filledCount} opsi."
+            );
+        }
+
+        if (!$hasAnyPoints && !$hasAnyCorrect) {
+            throw new RowImportFailedException(
+                'Tidak ada opsi yang ditandai benar (correct_X). Soal PG biasa wajib punya minimal 1 opsi benar, atau isi kolom points_X kalau soal ini pakai mode bobot poin (TKP).'
             );
         }
     }
@@ -197,16 +311,15 @@ class QuestionImporter extends Importer
                     continue;
                 }
 
-                $isCorrect = in_array(
-                    strtolower(trim((string) ($this->data["correct_{$i}"] ?? ''))),
-                    ['1', 'true', 'ya', 'yes', 'benar'],
-                    true
-                );
+                $isCorrect = $this->parseCorrectFlag((string) ($this->data["correct_{$i}"] ?? '')) === true;
+
+                $pointsRaw = trim((string) ($this->data["points_{$i}"] ?? ''));
+                $points = $pointsRaw !== '' ? (int) $pointsRaw : 0;
 
                 $this->record->options()->create([
                     'option_text' => $optionText,
                     'is_correct' => $isCorrect,
-                    'points' => 0,
+                    'points' => $points,
                 ]);
             }
         }

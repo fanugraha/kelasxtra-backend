@@ -59,19 +59,6 @@ class TransactionController extends Controller
     }
 
     /**
-     * POST /api/midtrans/callback
-     * Webhook Midtrans (bisa terkirim >1x, section 6 poin 4). Route publik,
-     * keamanan lewat signature verification (hash_equals) di dalam
-     * MidtransService::handleCallback().
-     */
-    public function callback(Request $request)
-    {
-        $this->midtrans->handleCallback($request->all());
-
-        return response()->json(['message' => 'OK']);
-    }
-
-    /**
      * GET /api/transactions/{transaction}
      * Polling status transaksi tunggal (webhook Midtrans tidak instan,
      * frontend perlu cara cek "sudah lunas belum" setelah checkout).

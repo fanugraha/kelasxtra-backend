@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\QuestionBankResource\RelationManagers;
 
 use Filament\Actions\CreateAction;
+use Filament\Actions\ImportAction;
+use App\Filament\Imports\QuestionImporter;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -62,7 +64,7 @@ class QuestionsRelationManager extends RelationManager
             TextInput::make('media_url')
                 ->label('URL Media')
                 ->helperText('Path atau URL file gambar/audio, misal: /storage/questions/soal-1.png')
-                ->visible(fn(Get $get) => $get('media_type') !== 'none')
+                ->visible(fn (Get $get) => $get('media_type') !== 'none')
                 ->columnSpanFull(),
 
             Select::make('type')
@@ -82,6 +84,12 @@ class QuestionsRelationManager extends RelationManager
                     'sedang' => 'Sedang',
                     'sulit' => 'Sulit',
                 ]),
+
+            Textarea::make('explanation')
+                ->label('Pembahasan')
+                ->helperText('Penjelasan kunci jawaban yang akan ditampilkan ke siswa di halaman pembahasan soal.')
+                ->rows(4)
+                ->columnSpanFull(),
 
             Repeater::make('options')
                 ->label('Pilihan Jawaban')
@@ -103,7 +111,7 @@ class QuestionsRelationManager extends RelationManager
                 ->defaultItems(4)
                 ->minItems(2)
                 ->addActionLabel('+ Tambah Opsi')
-                ->visible(fn(Get $get) => $get('type') === 'pg')
+                ->visible(fn (Get $get) => $get('type') === 'pg')
                 ->columnSpanFull(),
         ]);
     }
@@ -120,6 +128,12 @@ class QuestionsRelationManager extends RelationManager
             ])
             ->headerActions([
                 CreateAction::make(),
+                ImportAction::make()
+                    ->label('Import Soal')
+                    ->importer(QuestionImporter::class)
+                    ->options(fn () => ['bank_id' => $this->getOwnerRecord()->getKey()])
+                    ->maxRows(1000)
+                    ->chunkSize(50),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);
@@ -135,7 +149,7 @@ class QuestionsRelationManager extends RelationManager
             $label = ($section->category->name ?? 'Tanpa Kategori') . " ({$count}/{$section->target_count})";
 
             $tabs[(string) $section->category_id] = Tab::make($label)
-                ->modifyQueryUsing(fn(Builder $query) => $query->where('category_id', $section->category_id));
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('category_id', $section->category_id));
         }
 
         return $tabs;

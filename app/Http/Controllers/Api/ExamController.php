@@ -127,60 +127,31 @@ class ExamController extends Controller
      */
 
     /**
- * GET /api/my-exams
- * Daftar exam yang boleh diakses siswa — reuse AccessControlService::canAttemptExam()
- * (logic sama persis dengan yang dipakai start(), supaya tidak ada 2 sumber kebenaran
- * soal siapa boleh akses exam apa).
- */
-public function myExams(Request $request)
-{
-    $user = $request->user();
+     * GET /api/my-exams
+     * Daftar exam yang boleh diakses siswa — reuse AccessControlService::canAttemptExam()
+     * (logic sama persis dengan yang dipakai start(), supaya tidak ada 2 sumber kebenaran
+     * soal siapa boleh akses exam apa).
+     */
+    public function myExams(Request $request)
+    {
+        $user = $request->user();
 
-    $exams = Exam::with('bank')->withCount('questions')->get();
+        $exams = Exam::with('bank')->withCount('questions')->get();
 
-    return $exams
-        ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
-        ->values()
-        ->map(fn (Exam $exam) => [
-            'id' => $exam->id,
-            'title' => $exam->title,
-            'duration_minutes' => $exam->duration_minutes,
-            'passing_score' => $exam->passing_score,
-            'questions_count' => $exam->questions_count,
-            'is_free_preview' => $exam->is_free_preview,
-            'program_id' => $exam->bank->program_id,
-        ]);
-}
-
-/**
- * GET /api/packages/{package}/exams
- * Daftar exam yang termasuk dalam SATU package spesifik — dipakai halaman
- * "Latihan Soal" per-package (PackageExams.jsx). Sengaja pakai relasi
- * package->exams eksplisit (bukan lewat bank_id), supaya admin bisa
- * memilih exam mana saja yang dijual di package ini, bahkan kalau bank
- * soal itu punya beberapa exam lain yang tidak ikut dijual.
- */
-public function forPackage(Request $request, \App\Models\Package $package)
-{
-    $user = $request->user();
-
-    $exams = $package->exams()
-        ->with('bank')
-        ->withCount('questions')
-        ->get();
-
-    return $exams
-        ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
-        ->values()
-        ->map(fn (Exam $exam) => [
-            'id' => $exam->id,
-            'title' => $exam->title,
-            'duration_minutes' => $exam->duration_minutes,
-            'passing_score' => $exam->passing_score,
-            'questions_count' => $exam->questions_count,
-            'is_free_preview' => $exam->is_free_preview,
-        ]);
-}
+        return $exams
+            ->filter(fn(Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
+            ->values()
+            ->map(fn(Exam $exam) => [
+                'id' => $exam->id,
+                'title' => $exam->title,
+                'duration_minutes' => $exam->duration_minutes,
+                'passing_score' => $exam->passing_score,
+                'questions_count' => $exam->questions_count,
+                'is_free_preview' => $exam->is_free_preview,
+                'program_id' => $exam->bank->program_id,
+                'subject_id' => $exam->bank->subject_id,
+            ]);
+    }
 
     /**
      * GET /api/exams/{exam}/summary
@@ -210,7 +181,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
             ->get();
 
         $inProgress = $attempts->firstWhere('status', 'in_progress');
-        $completed = $attempts->reject(fn ($a) => $a->status === 'in_progress')->values();
+        $completed = $attempts->reject(fn($a) => $a->status === 'in_progress')->values();
 
         $formatAttempt = function (ExamAttempt $attempt) use ($exam) {
             $sections = $exam->sections->map(function ($section) use ($attempt) {
@@ -226,7 +197,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
             });
 
             $passed = $exam->require_all_sections_pass
-                ? $sections->isNotEmpty() && $sections->every(fn ($s) => $s['passed_threshold'] === true)
+                ? $sections->isNotEmpty() && $sections->every(fn($s) => $s['passed_threshold'] === true)
                 : $attempt->score >= $exam->passing_score;
 
             return [
@@ -246,7 +217,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 'duration_minutes' => $exam->duration_minutes,
                 'passing_score' => $exam->passing_score,
                 'is_free_preview' => $exam->is_free_preview,
-                'sections' => $exam->sections->map(fn ($s) => [
+                'sections' => $exam->sections->map(fn($s) => [
                     'code' => $s->code,
                     'name' => $s->name,
                     'min_passing_score' => $s->min_passing_score,
@@ -266,127 +237,6 @@ public function forPackage(Request $request, \App\Models\Package $package)
         $this->autoSubmitIfExpired($attempt);
 
         return new ExamAttemptResource($attempt->fresh(['exam.questions.options', 'exam.sections', 'answers', 'sectionScores']));
-    }
-
-    /**
-     * GET /api/exams/{exam}/attempts
-     * Riwayat SEMUA percobaan siswa untuk exam ini (bukan cuma pertama/terbaru
-     * seperti summary()) -- dipakai halaman yang menampilkan daftar "Perolehan
-     * Nilai" per percobaan. Setiap attempt disertai breakdown skor per section,
-     * supaya tabel Pelajaran/Passing Grade/Nilai bisa dirender langsung tanpa
-     * request tambahan.
-     */
-    public function attempts(Request $request, Exam $exam)
-    {
-        $user = $request->user();
-
-        if (!$exam->is_free_preview && !$this->accessControl->canAttemptExam($user, $exam)) {
-            return response()->json([
-                'message' => 'Anda tidak memiliki akses untuk melihat exam ini.',
-            ], 403);
-        }
-
-        $exam->load('sections');
-
-        $attempts = ExamAttempt::where('user_id', $user->id)
-            ->where('exam_id', $exam->id)
-            ->whereNull('exam_batch_id')
-            ->whereIn('status', ['submitted', 'auto_submitted', 'graded'])
-            ->with('sectionScores')
-            ->orderBy('started_at')
-            ->get();
-
-        $formatAttempt = function (ExamAttempt $attempt, int $index) use ($exam) {
-            $sections = $exam->sections->map(function ($section) use ($attempt) {
-                $result = $attempt->sectionScores->firstWhere('exam_section_id', $section->id);
-
-                return [
-                    'code' => $section->code,
-                    'name' => $section->name,
-                    'raw_score' => $result?->raw_score ?? 0,
-                    'correct_count' => $result?->correct_count ?? 0,
-                    'min_passing_score' => $section->min_passing_score,
-                    'passed_threshold' => $result?->passed_threshold,
-                ];
-            });
-
-            $passed = $exam->require_all_sections_pass
-                ? $sections->isNotEmpty() && $sections->every(fn ($s) => $s['passed_threshold'] === true)
-                : $attempt->score >= $exam->passing_score;
-
-            return [
-                'attempt_id' => $attempt->id,
-                'attempt_number' => $index + 1,
-                'started_at' => $attempt->started_at,
-                'finished_at' => $attempt->finished_at,
-                'score' => $attempt->score,
-                'correct_count' => $attempt->correct_count,
-                'sections' => $sections->values(),
-                'passed' => $passed,
-            ];
-        };
-
-        return response()->json([
-            'exam' => [
-                'id' => $exam->id,
-                'title' => $exam->title,
-                'passing_score' => $exam->passing_score,
-            ],
-            'attempts' => $attempts->values()->map($formatAttempt)->values(),
-        ]);
-    }
-
-    /**
-     * GET /api/exam-attempts/{attempt}/review
-     * Pembahasan lengkap per soal untuk satu attempt yang sudah selesai:
-     * teks soal, semua opsi, opsi yang dipilih siswa, opsi kunci jawaban,
-     * status benar/salah, dan teks pembahasan (questions.explanation).
-     * Hanya bisa diakses kalau attempt sudah tidak in_progress -- pembahasan
-     * tidak boleh bocor selagi siswa masih mengerjakan.
-     */
-    public function review(Request $request, ExamAttempt $attempt)
-    {
-        $this->authorizeOwnership($request, $attempt);
-
-        if ($attempt->status === 'in_progress') {
-            return response()->json([
-                'message' => 'Pembahasan hanya tersedia setelah ujian selesai.',
-            ], 422);
-        }
-
-        $attempt->load(['exam.questions.options', 'answers']);
-
-        $questions = $attempt->exam->questions->map(function ($question) use ($attempt) {
-            $answer = $attempt->answers->firstWhere('question_id', $question->id);
-            $correctOption = $question->options->firstWhere('is_correct', true);
-
-            return [
-                'question_id' => $question->id,
-                'question_text' => $question->question_text,
-                'media_type' => $question->media_type,
-                'media_url' => $question->media_url,
-                'type' => $question->type,
-                'explanation' => $question->explanation,
-                'options' => $question->options->map(fn ($opt) => [
-                    'id' => $opt->id,
-                    'option_text' => $opt->option_text,
-                    'is_correct' => $opt->is_correct,
-                ])->values(),
-                'selected_option_id' => $answer?->selected_option_id,
-                'essay_answer' => $answer?->essay_answer,
-                'correct_option_id' => $correctOption?->id,
-                'is_correct' => $answer?->is_correct,
-                'needs_manual_grading' => $answer?->needs_manual_grading ?? false,
-            ];
-        });
-
-        return response()->json([
-            'attempt_id' => $attempt->id,
-            'exam_title' => $attempt->exam->title,
-            'score' => $attempt->score,
-            'correct_count' => $attempt->correct_count,
-            'questions' => $questions->values(),
-        ]);
     }
 
     /**
@@ -541,14 +391,10 @@ public function forPackage(Request $request, \App\Models\Package $package)
                     continue;
                 }
 
-                // soal pg: koreksi jawaban siswa dengan kunci jawaban (is_correct
-                // pada question_options). Poin diambil dari bobot soal di pivot
-                // exam_questions (points per soal), fallback 1 poin kalau bobot
-                // belum diisi -- supaya nilai tetap bisa dihitung meski data bobot
-                // di exam_questions/question_options belum lengkap.
+                // soal pg: baca points langsung dari opsi yang dipilih siswa
                 $selectedOption = $answer->question->options->firstWhere('id', $answer->selected_option_id);
+                $points = $selectedOption->points ?? 0;
                 $isCorrect = (bool) ($selectedOption->is_correct ?? false);
-                $points = $isCorrect ? ($pivot->points ?? 1) : 0;
 
                 $answer->update(['is_correct' => $isCorrect]);
 
