@@ -229,6 +229,51 @@ class AuthController extends Controller
         return response()->json($request->user());
     }
 
+    /**
+     * PUT /api/auth/profile
+     * Update data profil siswa yang sedang login (bukan email — email tidak
+     * bisa diubah lewat sini karena dipakai sebagai identitas login/verifikasi).
+     */
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:20'],
+            'level_pendidikan' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        $user->update($data);
+
+        return response()->json($user->fresh());
+    }
+
+    /**
+     * PUT /api/auth/password
+     * Ganti password saat sudah login (beda dari resetPassword() yang
+     * dipakai untuk alur lupa password via email token).
+     */
+    public function updatePassword(Request $request)
+    {
+        $user = $request->user();
+
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => 'Password lama tidak sesuai.',
+            ]);
+        }
+
+        $user->update(['password' => Hash::make($data['password'])]);
+
+        return response()->json(['message' => 'Password berhasil diubah.']);
+    }
+
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();

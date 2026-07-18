@@ -66,7 +66,9 @@ Route::post('/promos/validate', [PromoController::class, 'validateCode'])
 // ==================== ROUTE PRIVATE (AUTH SANCTUM) ====================
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/auth/me', [AuthController::class, 'me']);
+Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
+    Route::put('/auth/password', [AuthController::class, 'updatePassword']);    
     Route::post('/auth/logout', [AuthController::class, 'logout']);
 
     // Kelas & Jadwal
