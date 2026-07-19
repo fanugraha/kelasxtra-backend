@@ -32,6 +32,9 @@ class PackagesTable
                 IconColumn::make('is_focus_topic')
                     ->label('Fokus Topik')
                     ->boolean(),
+                TextColumn::make('category.name')
+                    ->label('Topik')
+                    ->placeholder('—'),
                 TextColumn::make('price')
                     ->money('IDR')
                     ->sortable(),

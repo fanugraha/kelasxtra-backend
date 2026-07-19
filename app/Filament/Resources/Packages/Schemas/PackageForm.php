@@ -50,6 +50,21 @@ class PackageForm
                     ->label('Paket Fokus 1 Topik')
                     ->helperText('Aktifkan kalau paket ini jual latihan soal 1 kategori saja (mis. khusus TWK/TIU/TKP), bukan gabungan semua topik. Akan ditampilkan di section "Latihan Fokus" di Beranda, terpisah dari paket try out lengkap.')
                     ->default(false),
+                Select::make('category_id')
+                    ->label('Topik Fokus')
+                    ->relationship('category', 'name')
+                    ->searchable()
+                    ->preload()
+                    ->visible(fn (Get $get) => $get('is_focus_topic'))
+                    ->required(fn (Get $get) => $get('is_focus_topic'))
+                    ->options(function (Get $get) {
+                        $programId = $get('program_id');
+
+                        return \App\Models\Category::query()
+                            ->when($programId, fn ($q) => $q->where('program_id', $programId))
+                            ->pluck('name', 'id');
+                    })
+                    ->helperText('Pilih kategori/topik yang jadi fokus paket ini (mis. TWK). Cuma nampilin kategori dari Program yang dipilih di atas.'),
                 Select::make('exams')
                     ->label('Exam/Ujian yang Dijual')
                     ->relationship('exams', 'title')
