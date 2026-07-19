@@ -55,8 +55,8 @@ Route::post('/midtrans/callback', [MidtransCallbackController::class, 'handleCal
 Route::get('/programs', [ProgramController::class, 'index']);
 Route::get('/packages', [PackageController::class, 'index']);
 Route::get('/packages/recommended', [PackageController::class, 'recommended']);
+Route::get('/packages/focus-topics', [PackageController::class, 'focusTopics']);
 Route::get('/packages/{package}', [PackageController::class, 'show']);
-Route::get('/packages/{package}/focus-topics', [PackageController::class, 'focusTopics']);
 Route::get('/articles', [ArticleController::class, 'index']);
 Route::get('/articles/{slug}', [ArticleController::class, 'show']);
 Route::get('/promos/active', [PromoController::class, 'active']);
