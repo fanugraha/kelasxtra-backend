@@ -17,6 +17,7 @@ class Package extends Model
         'subject_id',
         'name',
         'type',
+        'is_focus_topic',
         'price',
         'discount_price',
         'duration_days',
@@ -33,6 +34,7 @@ class Package extends Model
             'discount_price' => 'decimal:2',
             'features' => 'array',
             'materi' => 'array',
+            'is_focus_topic' => 'boolean',
         ];
     }
 
