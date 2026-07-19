@@ -64,10 +64,6 @@ class ExamResource extends Resource
             Toggle::make('is_free_preview')
                 ->label('Free preview (bisa diakses tanpa enrollment)')
                 ->default(false),
-            Toggle::make('is_focus_practice')
-                ->label('Latihan Fokus (satu topik)')
-                ->helperText('Aktifkan kalau Exam ini isinya cuma 1 kategori/section (mis. TWK saja). Akan muncul di section "Latihan Fokus" sebelum daftar try out lengkap.')
-                ->default(false),
         ]);
     }
 
@@ -87,7 +83,6 @@ class ExamResource extends Resource
                 TextColumn::make('duration_minutes')->suffix(' menit'),
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
                 IconColumn::make('is_free_preview')->label('Free Preview')->boolean(),
-                IconColumn::make('is_focus_practice')->label('Latihan Fokus')->boolean(),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);
