@@ -76,6 +76,35 @@ class PackageController extends Controller
     }
 
     /**
+     * GET /api/packages/{package}/focus-topics
+     * Daftar Exam yang ditandai "Latihan Fokus" (satu topik/kategori saja)
+     * di dalam paket ini -- dipakai untuk section "Latihan Fokus" di Beranda
+     * dan halaman paket, ditampilkan di atas daftar try out lengkap.
+     */
+    public function focusTopics(Package $package)
+    {
+        $topics = $package->exams()
+            ->where('is_focus_practice', true)
+            ->with('sections.category')
+            ->withCount('questions')
+            ->get()
+            ->map(function ($exam) {
+                $section = $exam->sections->first();
+
+                return [
+                    'exam_id' => $exam->id,
+                    'title' => $exam->title,
+                    'category_code' => $section?->category?->code,
+                    'category_name' => $section?->category?->name,
+                    'question_count' => $exam->questions_count,
+                    'duration_minutes' => $exam->duration_minutes,
+                ];
+            });
+
+        return response()->json($topics);
+    }
+
+    /**
      * GET /api/packages/{package}
      * Detail satu paket.
      */
