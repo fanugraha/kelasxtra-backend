@@ -71,6 +71,13 @@ class AuthController extends Controller
             ]);
         }
 
+        // Single-session: hapus semua token lama milik user ini SEBELUM
+        // bikin token baru -- begitu berhasil login di device/browser baru,
+        // sesi di device lain otomatis tidak valid lagi (token-nya sudah
+        // dihapus dari database, jadi request berikutnya dari device lama
+        // akan ditolak 401 oleh middleware auth:sanctum).
+        $user->tokens()->delete();
+
         $token = $user->createToken('siswa-app')->plainTextToken;
 
         return response()->json(['user' => $user, 'token' => $token]);
@@ -145,6 +152,10 @@ class AuthController extends Controller
                 'email' => 'Akun Anda tidak aktif, hubungi admin.',
             ]);
         }
+
+        // Single-session: sama seperti login email/password -- hapus semua
+        // token lama sebelum membuat sesi baru.
+        $user->tokens()->delete();
 
         $token = $user->createToken('siswa-app')->plainTextToken;
 
