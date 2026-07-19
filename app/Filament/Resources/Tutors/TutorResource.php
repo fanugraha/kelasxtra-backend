@@ -20,7 +20,11 @@ class TutorResource extends Resource
 {
     protected static ?string $model = Tutor::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedAcademicCap;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Kelas & Akademik';
+
+    protected static ?int $navigationSort = 4;
 
     public static function form(Schema $schema): Schema
     {

@@ -18,4 +18,14 @@ class EditPromo extends EditRecord
             DeleteAction::make(),
         ];
     }
+
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if ($data['unlimited_time'] ?? false) {
+            $data['valid_until'] = null;
+        }
+        unset($data['unlimited_time']);
+
+        return $data;
+    }
 }

@@ -20,7 +20,11 @@ class EnrollmentResource extends Resource
 {
     protected static ?string $model = Enrollment::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserGroup;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Kelas & Akademik';
+
+    protected static ?int $navigationSort = 3;
 
     public static function form(Schema $schema): Schema
     {
@@ -52,5 +56,17 @@ class EnrollmentResource extends Resource
             'view' => ViewEnrollment::route('/{record}'),
             'edit' => EditEnrollment::route('/{record}/edit'),
         ];
+    }
+
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getModel()::where('status', 'pending')->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
     }
 }

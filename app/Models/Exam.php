@@ -52,6 +52,11 @@ class Exam extends Model
         return $this->hasMany(ExamBatch::class);
     }
 
+    public function practiceLeaderboards(): HasMany
+    {
+        return $this->hasMany(PracticeLeaderboard::class);
+    }
+
     public function attempts(): HasMany
     {
         return $this->hasMany(ExamAttempt::class);

@@ -8,6 +8,7 @@ use App\Models\Promo;
 use App\Models\Transaction;
 use App\Services\MidtransService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TransactionController extends Controller
 {
@@ -20,6 +21,11 @@ class TransactionController extends Controller
      * Body: package_id, promo_code (opsional)
      * Selalu bikin row transaksi baru (histori "Riwayat Transaksi" tetap lengkap
      * kalau siswa retry checkout, sesuai section 6 poin 6).
+     *
+     * Promo dicek ulang di sini (bukan cuma di validateCode()) karena kondisi
+     * bisa berubah di antara user validate kode dan user beneran checkout.
+     * lockForUpdate() dipakai supaya 2 checkout bersamaan di detik terakhir
+     * kuota promo tidak sama-sama lolos.
      */
     public function checkout(Request $request)
     {
@@ -29,21 +35,38 @@ class TransactionController extends Controller
         ]);
 
         $package = Package::findOrFail($data['package_id']);
+        $user = $request->user();
 
-        $promo = null;
-        if (! empty($data['promo_code'])) {
-            $promo = Promo::where('code', $data['promo_code'])->first();
+        // Cegah beli ulang paket yang sudah pernah lunas — sekali sukses,
+        // paket itu terkunci selamanya untuk user ini, walau duration_days
+        // sudah lewat. Tidak ada logic re-purchase setelah kadaluarsa.
+        $alreadyOwned = $user->transactions()
+            ->where('package_id', $package->id)
+            ->where('status', 'success')
+            ->exists();
 
-            if (! $promo) {
-                return response()->json(['message' => 'Kode promo tidak ditemukan.'], 404);
-            }
-
-            if (now()->toDateString() > $promo->valid_until->toDateString()) {
-                return response()->json(['message' => 'Kode promo sudah kedaluwarsa.'], 422);
-            }
+        if ($alreadyOwned) {
+            abort(422, 'Kamu sudah memiliki paket ini.');
         }
 
-        $transaction = $this->midtrans->createTransaction($request->user(), $package, $promo);
+        $transaction = DB::transaction(function () use ($data, $package, $user) {
+            $promo = null;
+
+            if (! empty($data['promo_code'])) {
+                $promo = Promo::where('code', $data['promo_code'])->lockForUpdate()->first();
+
+                if (! $promo) {
+                    abort(404, 'Kode promo tidak ditemukan.');
+                }
+
+                $error = $promo->checkUsableBy($user, $package);
+                if ($error) {
+                    abort(422, $error);
+                }
+            }
+
+            return $this->midtrans->createTransaction($user, $package, $promo);
+        });
 
         return response()->json($transaction, 201);
     }
@@ -73,9 +96,7 @@ class TransactionController extends Controller
     /**
      * POST /api/transactions/{transaction}/resume
      * Generate ulang Snap token untuk transaksi pending — dipakai tombol
-     * "Lanjutkan Pembayaran" di halaman status transaksi. order_id dipakai
-     * ulang (bukan bikin transaksi baru), Midtrans izinkan ini selama status
-     * transaksi masih pending di sisi mereka.
+     * "Lanjutkan Pembayaran" di halaman status transaksi.
      */
     public function resume(Request $request, Transaction $transaction)
     {

@@ -24,14 +24,10 @@ class MidtransService
     {
         $basePrice = (float) ($package->discount_price ?? $package->price);
 
-        $discountAmount = 0;
-        if ($promo) {
-            $discountAmount = $promo->discount_type === 'percentage'
-                ? $basePrice * ((float) $promo->discount_value / 100)
-                : (float) $promo->discount_value;
-
-            $discountAmount = min($discountAmount, $basePrice);
-        }
+        // Pakai Promo::calculateDiscount() (bukan hitung ulang di sini) supaya
+        // aturan cap max_discount_amount ikut diterapkan konsisten dengan
+        // yang ditampilkan ke user pas validateCode().
+        $discountAmount = $promo ? $promo->calculateDiscount($package) : 0;
 
         $amount = max($basePrice - $discountAmount, 0);
         $orderId = $this->generateOrderId($package);

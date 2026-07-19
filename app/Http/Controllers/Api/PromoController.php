@@ -15,8 +15,16 @@ class PromoController extends Controller
      */
     public function active(Request $request)
     {
-        return Promo::where('valid_until', '>=', now()->toDateString())
-            ->orderBy('valid_until')
+        return Promo::where('is_active', true)
+            ->where(function ($query) {
+                $query->whereNull('valid_until')
+                    ->orWhere('valid_until', '>=', now()->toDateString());
+            })
+            ->where(function ($query) {
+                $query->whereNull('valid_from')
+                    ->orWhere('valid_from', '<=', now());
+            })
+            ->orderByRaw('valid_until IS NULL, valid_until ASC')
             ->get();
     }
 
@@ -37,29 +45,30 @@ class PromoController extends Controller
 
         $promo = Promo::where('code', $data['code'])->first();
 
-        if (! $promo) {
+        if (!$promo) {
             return response()->json(['message' => 'Kode promo tidak ditemukan.'], 404);
         }
 
-        if (now()->toDateString() > $promo->valid_until->toDateString()) {
-            return response()->json(['message' => 'Kode promo sudah kedaluwarsa.'], 422);
+        $package = Package::findOrFail($data['package_id']);
+        $user = $request->user();
+
+        // Pakai aturan yang sama dengan TransactionController::checkout(),
+        // supaya kode yang lolos di sini pasti juga lolos pas checkout
+        // beneran (termasuk new_user_only, usage_limit_per_user, total_quota,
+        // dan applicable_package_id — sebelumnya cuma valid_until yang dicek).
+        $error = $promo->checkUsableBy($user, $package);
+        if ($error) {
+            return response()->json(['message' => $error], 422);
         }
 
-        $package = Package::findOrFail($data['package_id']);
         $basePrice = (float) ($package->discount_price ?? $package->price);
-
-        $discountAmount = $promo->discount_type === 'percentage'
-            ? $basePrice * ((float) $promo->discount_value / 100)
-            : (float) $promo->discount_value;
-
-        // Potongan tidak boleh melebihi harga paket itu sendiri.
-        $discountAmount = min($discountAmount, $basePrice);
+        $discountAmount = $promo->calculateDiscount($package);
         $finalAmount = max($basePrice - $discountAmount, 0);
 
         return response()->json([
             'promo' => $promo,
             'base_price' => $basePrice,
-            'discount_amount' => round($discountAmount, 2),
+            'discount_amount' => $discountAmount,
             'final_amount' => round($finalAmount, 2),
         ]);
     }

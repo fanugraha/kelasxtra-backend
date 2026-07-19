@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClassController;
 use App\Http\Controllers\Api\ExamController;
 use App\Http\Controllers\Api\LeaderboardController;
+use App\Http\Controllers\Api\PracticeLeaderboardController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\TutorGradingController;
@@ -66,9 +67,9 @@ Route::post('/promos/validate', [PromoController::class, 'validateCode'])
 // ==================== ROUTE PRIVATE (AUTH SANCTUM) ====================
 
 Route::middleware('auth:sanctum')->group(function () {
-Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::get('/auth/me', [AuthController::class, 'me']);
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
-    Route::put('/auth/password', [AuthController::class, 'updatePassword']);    
+    Route::put('/auth/password', [AuthController::class, 'updatePassword']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
 
     // Kelas & Jadwal
@@ -97,6 +98,7 @@ Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/exam-attempts/{attempt}/tab-switch', [ExamController::class, 'recordTabSwitch']);
     Route::post('/exam-attempts/{attempt}/finish', [ExamController::class, 'finish']);
 
+    Route::get('/my-exams/latest-attempted', [ExamController::class, 'latestAttemptedExam']);
     Route::get('/my-exams', [ExamController::class, 'myExams']);
     Route::get('/exams/{exam}/summary', [ExamController::class, 'summary']);
     Route::get('/exams/{exam}/banks', [ExamController::class, 'banks']);
@@ -109,6 +111,11 @@ Route::get('/auth/me', [AuthController::class, 'me']);
     Route::get('/exam-batches/{examBatch}/leaderboard', [LeaderboardController::class, 'index']);
     Route::get('/exam-batches/{examBatch}/leaderboard/me', [LeaderboardController::class, 'myPosition']);
 
+    // Leaderboard Latihan Soal (mingguan)
+    Route::get('/exams/leaderboard/ranked', [PracticeLeaderboardController::class, 'ranked']);
+    Route::get('/exams/{exam}/leaderboard', [PracticeLeaderboardController::class, 'index']);
+    Route::get('/exams/{exam}/leaderboard/me', [PracticeLeaderboardController::class, 'myPosition']);
+
     // Role-check tegas: khusus tutor & admin (section 3 & 8)
     Route::middleware('role:tutor,admin')->prefix('tutor')->group(function () {
         Route::get('/essay-queue', [TutorGradingController::class, 'index']);
@@ -117,5 +124,13 @@ Route::get('/auth/me', [AuthController::class, 'me']);
 
     Route::get('/my-packages', [EnrollmentController::class, 'index']);
 
-    
+
+});
+
+// ── Notifikasi (leaderboard reward, dsb) ─────────────────────────────
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/notifications', [\App\Http\Controllers\Api\NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [\App\Http\Controllers\Api\NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/{id}/read', [\App\Http\Controllers\Api\NotificationController::class, 'markAsRead']);
+    Route::post('/notifications/read-all', [\App\Http\Controllers\Api\NotificationController::class, 'markAllAsRead']);
 });

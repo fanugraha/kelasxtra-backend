@@ -4,7 +4,9 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 use App\Models\ExamBatch;
+use App\Models\Exam;
 use App\Jobs\GenerateLeaderboardJob;
+use App\Jobs\GeneratePracticeLeaderboardJob;
 
 /*
 |--------------------------------------------------------------------------
@@ -44,3 +46,20 @@ Schedule::call(function () {
  * transaksi pending yang sudah lewat batas waktu wajar.
  */
 Schedule::command('transactions:reconcile')->everyThirtyMinutes();
+
+/**
+ * AUTOMATISASI LEADERBOARD LATIHAN SOAL MINGGUAN
+ *
+ * Jalan tiap Minggu jam 23:55 (akhir periode ISO week). Loop ke semua Exam
+ * yang punya minimal 1 attempt latihan soal (exam_batch_id NULL), lalu
+ * proses ranking + reward mingguan lewat PracticeLeaderboardService.
+ */
+Schedule::call(function () {
+    $examIds = Exam::whereHas('attempts', function ($query) {
+        $query->whereNull('exam_batch_id');
+    })->pluck('id');
+
+    foreach ($examIds as $examId) {
+        GeneratePracticeLeaderboardJob::dispatch(Exam::find($examId));
+    }
+})->weeklyOn(0, '23:55');

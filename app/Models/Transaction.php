@@ -57,4 +57,33 @@ class Transaction extends Model
     {
         return $this->hasOne(Enrollment::class);
     }
+
+    // Sinkronisasi otomatis: apa pun cara admin mengubah status transaksi
+    // (form edit manual, tombol aksi, dsb), enrollment terkait ikut disesuaikan.
+    // success -> akses diberikan (active), failed/expired -> akses dicabut (expired).
+    protected static function booted(): void
+    {
+        static::updated(function (Transaction $transaction) {
+            if (! $transaction->wasChanged('status')) {
+                return;
+            }
+
+            $enrollment = $transaction->enrollment;
+
+            if (! $enrollment) {
+                return;
+            }
+
+            match ($transaction->status) {
+                'success' => $enrollment->update([
+                    'status' => 'active',
+                    'start_date' => $enrollment->start_date ?? now(),
+                ]),
+                'failed', 'expired' => $enrollment->update([
+                    'status' => 'expired',
+                ]),
+                default => null,
+            };
+        });
+    }
 }

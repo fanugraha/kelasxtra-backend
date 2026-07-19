@@ -61,7 +61,7 @@ class LeaderboardController extends Controller
         $totalPeserta = $examBatch->leaderboardSnapshots()->count();
 
         // Interpretasi Top % Nasional (misal Percentile 95.00 berarti siswa masuk Top 5% Nasional)
-        $topPercentile = count($examBatch->leaderboardSnapshots) > 0 
+        $topPercentile = $totalPeserta > 0 
             ? round(100 - $snapshot->percentile, 2) 
             : 0;
 

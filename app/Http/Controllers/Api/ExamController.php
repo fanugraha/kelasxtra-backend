@@ -213,6 +213,38 @@ class ExamController extends Controller
     }
 
 /**
+     * GET /api/my-exams/latest-attempted
+     * Exam Latihan Soal (attempt mandiri, exam_batch_id null) yang PALING BARU
+     * dikerjakan/dilanjutkan siswa -- dipakai Beranda untuk menentukan exam mana
+     * yang ditampilkan di section Leaderboard Mingguan, karena leaderboard
+     * mingguan itu basisnya Latihan Soal, bukan Try Out batch.
+     * Fallback: kalau siswa belum pernah mengerjakan Latihan Soal sama sekali,
+     * balikin exam Latihan Soal pertama yang boleh diakses, supaya section
+     * tetap bisa menampilkan leaderboard periode berjalan meski skornya kosong.
+     */
+    public function latestAttemptedExam(Request $request)
+    {
+        $user = $request->user();
+
+        $latestAttempt = ExamAttempt::where('user_id', $user->id)
+            ->whereNull('exam_batch_id')
+            ->orderByDesc('started_at')
+            ->first();
+
+        if ($latestAttempt) {
+            return response()->json(['exam_id' => $latestAttempt->exam_id]);
+        }
+
+        $exams = Exam::with('bank')->get();
+
+        $fallback = $exams
+            ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
+            ->first();
+
+        return response()->json(['exam_id' => $fallback?->id]);
+    }
+
+/**
      * GET /api/my-exams
      * Daftar exam yang boleh diakses siswa — reuse AccessControlService::canAttemptExam()
      * (logic sama persis dengan yang dipakai start(), supaya tidak ada 2 sumber kebenaran
@@ -747,6 +779,11 @@ public function forPackage(Request $request, \App\Models\Package $package)
      */
     protected function gradeAndClose(ExamAttempt $attempt, string $status): void
     {
+        // exam_batch_id null = mode latihan soal (leaderboard mingguan berlaku
+        // di sini). Try out batch pakai leaderboard-nya sendiri (LeaderboardController),
+        // tidak disentuh oleh trigger ini.
+        $isPracticeExam = $attempt->exam_batch_id === null;
+
         DB::transaction(function () use ($attempt, $status) {
             $answers = $attempt->answers()->with('question.options')->get();
             $examQuestions = $attempt->exam->questions; // pivot: points, exam_section_id
@@ -833,6 +870,22 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 'finished_at' => now(),
             ]);
         });
+
+        // Leaderboard mingguan latihan soal di-generate ulang INSTAN begitu
+        // attempt-nya final (skor sudah pasti, tidak ada essay pending) --
+        // bukan nunggu job terjadwal mingguan. Job terjadwal tetap ada sebagai
+        // jaring pengaman (menangani exam yang skornya baru final belakangan,
+        // misal lewat penilaian essay manual TutorGradingController -- kalau
+        // exam latihan soal kamu punya soal essay, tambahkan trigger yang sama
+        // di sana supaya leaderboard-nya juga instan, bukan cuma tertutupi job).
+        //
+        // Kuota voucher per siswa per minggu (lihat PracticeLeaderboardService::
+        // assignReward()) otomatis jadi "siapa cepat dia dapat" secara kronologis
+        // begitu trigger ini instan -- exam yang diselesaikan siswa lebih dulu
+        // yang dapet prioritas voucher, tanpa perlu logic tambahan.
+        if ($isPracticeExam && $attempt->fresh()->status === 'graded') {
+            app(\App\Services\PracticeLeaderboardService::class)->generateForExam($attempt->exam);
+        }
     }
 
     protected function authorizeOwnership(Request $request, ExamAttempt $attempt): void
