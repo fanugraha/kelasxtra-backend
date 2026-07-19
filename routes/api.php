@@ -4,10 +4,12 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClassController;
 use App\Http\Controllers\Api\ExamController;
 use App\Http\Controllers\Api\LeaderboardController;
+use App\Http\Controllers\Api\LeaderboardEventController;
 use App\Http\Controllers\Api\PracticeLeaderboardController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\TutorGradingController;
+use App\Http\Controllers\Api\UserPrivacyController;
 use App\Http\Controllers\Api\MidtransCallbackController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PackageController;
@@ -116,6 +118,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/exams/leaderboard/ranked', [PracticeLeaderboardController::class, 'ranked']);
     Route::get('/exams/{exam}/leaderboard', [PracticeLeaderboardController::class, 'index']);
     Route::get('/exams/{exam}/leaderboard/me', [PracticeLeaderboardController::class, 'myPosition']);
+
+    // Notifikasi rank-change (Beranda)
+    Route::get('/leaderboard-events/me', [LeaderboardEventController::class, 'me']);
+    Route::get('/leaderboard-events/feed', [LeaderboardEventController::class, 'feed']);
+
+    // Privasi akun
+    Route::patch('/user/privacy', [UserPrivacyController::class, 'update']);
 
     // Role-check tegas: khusus tutor & admin (section 3 & 8)
     Route::middleware('role:tutor,admin')->prefix('tutor')->group(function () {

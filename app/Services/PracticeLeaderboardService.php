@@ -4,10 +4,12 @@ namespace App\Services;
 
 use App\Models\Exam;
 use App\Models\ExamAttempt;
+use App\Models\LeaderboardEvent;
 use App\Models\PracticeLeaderboard;
 use App\Models\Promo;
 use App\Notifications\PracticeLeaderboardRewardNotification;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -78,31 +80,97 @@ class PracticeLeaderboardService
 
         $now = Carbon::now();
 
-        DB::transaction(function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now) {
-            // Bersihkan entri lama untuk exam + periode ini (idempotent)
-            PracticeLeaderboard::where('exam_id', $exam->id)
+        // Lock per exam+periode -- mencegah race condition kalau 2 siswa
+        // submit exam yang sama nyaris bersamaan. Tanpa ini, dua proses bisa
+        // saling baca "rank lama" yang sama sebelum salah satu selesai
+        // menulis, dan hasil rank/event jadi tidak akurat.
+        $lock = Cache::lock("leaderboard:{$exam->id}:{$periode}", 30);
+
+        $lock->block(10, function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now) {
+            // Tangkap rank lama SEBELUM entri dihapus -- setelah delete() di
+            // bawah, rank lama sudah tidak ada di database sama sekali, jadi
+            // ini satu-satunya titik yang bisa dipakai buat deteksi
+            // perubahan rank (dasar notifikasi rank-change).
+            $oldRanks = PracticeLeaderboard::where('exam_id', $exam->id)
                 ->where('periode', $periode)
-                ->delete();
+                ->pluck('ranking', 'user_id');
 
-            foreach ($bestAttempts as $index => $row) {
-                $rank = $index + 1;
-                $userId = $row->user_id;
+            DB::transaction(function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now, $oldRanks) {
+                // Bersihkan entri lama untuk exam + periode ini (idempotent)
+                PracticeLeaderboard::where('exam_id', $exam->id)
+                    ->where('periode', $periode)
+                    ->delete();
 
-                $entry = PracticeLeaderboard::create([
-                    'exam_id' => $exam->id,
-                    'user_id' => $userId,
-                    'periode' => $periode,
-                    'skor_terbaik' => $row->best_score,
-                    'ranking' => $rank,
-                    'reward_type' => null,
-                    'discount_code' => null,
-                ]);
+                foreach ($bestAttempts as $index => $row) {
+                    $rank = $index + 1;
+                    $userId = $row->user_id;
 
-                if ($rank <= 3) {
-                    $this->assignReward($entry, $rank, $periode, $rewardEligible, $now);
+                    $entry = PracticeLeaderboard::create([
+                        'exam_id' => $exam->id,
+                        'user_id' => $userId,
+                        'periode' => $periode,
+                        'skor_terbaik' => $row->best_score,
+                        'ranking' => $rank,
+                        'reward_type' => null,
+                        'discount_code' => null,
+                    ]);
+
+                    if ($rank <= 3) {
+                        $this->assignReward($entry, $rank, $periode, $rewardEligible, $now);
+                    }
+
+                    $this->recordRankEventIfEligible($exam->id, $userId, $periode, $oldRanks[$userId] ?? null, $rank);
                 }
-            }
+            });
         });
+    }
+
+    /**
+     * Catat event rank-change HANYA kalau lolos filter milestone -- ini
+     * pertahanan utama supaya 1 kali submission tidak mencatat ratusan
+     * event sekaligus (generateForExam menghitung ULANG SELURUH leaderboard
+     * tiap dipanggil, jadi 1 attempt baru bisa menggeser rank semua orang
+     * di bawahnya).
+     *
+     * Layak dicatat kalau:
+     * - rank baru menembus milestone (Top 50/10/3) yang sebelumnya belum
+     *   pernah tercapai di periode ini, ATAU
+     * - rank membaik >= threshold posisi (mis. dari rank 80 ke rank 65)
+     *
+     * Entri pertama kali di periode ini (old_rank null) tetap bisa lolos
+     * kalau rank awalnya langsung menembus milestone -- tapi TIDAK otomatis
+     * dianggap layak hanya karena baru pertama kali submit.
+     */
+    protected function recordRankEventIfEligible(int $examId, int $userId, string $periode, ?int $oldRank, int $newRank): void
+    {
+        $milestones = config('leaderboard.rank_notify_milestones', [50, 10, 3]);
+        $threshold = config('leaderboard.rank_notify_threshold', 10);
+
+        $crossedMilestone = false;
+        foreach ($milestones as $milestone) {
+            $reachedNow = $newRank <= $milestone;
+            $reachedBefore = $oldRank !== null && $oldRank <= $milestone;
+
+            if ($reachedNow && ! $reachedBefore) {
+                $crossedMilestone = true;
+                break;
+            }
+        }
+
+        $improvedEnough = $oldRank !== null && ($oldRank - $newRank) >= $threshold;
+
+        if (! $crossedMilestone && ! $improvedEnough) {
+            return;
+        }
+
+        LeaderboardEvent::create([
+            'exam_id' => $examId,
+            'user_id' => $userId,
+            'periode' => $periode,
+            'old_rank' => $oldRank,
+            'new_rank' => $newRank,
+            'is_milestone' => $crossedMilestone,
+        ]);
     }
 
     /**

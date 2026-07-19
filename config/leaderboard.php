@@ -19,8 +19,17 @@ return [
 
     // Nominal potongan (max_discount_amount) untuk tiap posisi juara.
     'reward_amounts' => [
-        1 => env('LEADERBOARD_REWARD_RANK_1', 50000),
-        2 => env('LEADERBOARD_REWARD_RANK_2', 30000),
-        3 => env('LEADERBOARD_REWARD_RANK_3', 15000),
+        1 => env('LEADERBOARD_REWARD_RANK_1', 5000),
+        2 => env('LEADERBOARD_REWARD_RANK_2', 3000),
+        3 => env('LEADERBOARD_REWARD_RANK_3', 1500),
     ],
+
+    // Rank berapa saja yang dianggap "milestone" -- dipakai buat filter
+    // notifikasi rank-change. Tembus ke salah satu angka ini (dan sebelumnya
+    // belum pernah tembus di periode yang sama) -> layak dicatat sebagai event.
+    'rank_notify_milestones' => [50, 10, 3],
+
+    // Minimal kenaikan posisi supaya tetap dianggap layak notifikasi meski
+    // tidak menembus milestone manapun (mis. dari rank 80 ke rank 65).
+    'rank_notify_threshold' => env('LEADERBOARD_RANK_NOTIFY_THRESHOLD', 10),
 ];

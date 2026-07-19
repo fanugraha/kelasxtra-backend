@@ -25,6 +25,7 @@ class User extends Authenticatable implements \Illuminate\Contracts\Auth\MustVer
         'role',
         'level_pendidikan',
         'is_active',
+        'hide_from_leaderboard_feed',
     ];
 
     protected $hidden = [
@@ -38,6 +39,7 @@ class User extends Authenticatable implements \Illuminate\Contracts\Auth\MustVer
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'hide_from_leaderboard_feed' => 'boolean',
         ];
     }
 

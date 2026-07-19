@@ -48,6 +48,14 @@ Schedule::call(function () {
 Schedule::command('transactions:reconcile')->everyThirtyMinutes();
 
 /**
+ * PEMBERSIHAN LEADERBOARD_EVENTS (retensi 30 hari)
+ * Jalan tiap hari jam 03:00 -- hapus event rank-change yang lebih tua dari
+ * 30 hari supaya tabel tidak menggembung (event ini cuma dipakai untuk
+ * notifikasi toast jangka pendek, tidak perlu disimpan lama).
+ */
+Schedule::command('leaderboard:prune-events')->dailyAt('03:00');
+
+/**
  * AUTOMATISASI LEADERBOARD LATIHAN SOAL MINGGUAN
  *
  * Jalan tiap Minggu jam 23:55 (akhir periode ISO week). Loop ke semua Exam
