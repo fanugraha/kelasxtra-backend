@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Packages\Tables;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ReplicateAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -51,6 +52,16 @@ class PackagesTable
             ->recordActions([
                 ViewAction::make(),
                 EditAction::make(),
+                ReplicateAction::make()
+                    ->label('Duplikat')
+                    ->excludeAttributes(['created_at', 'updated_at'])
+                    ->beforeReplicaSaved(function ($replica) {
+                        $replica->name = $replica->name . ' (Copy)';
+                    })
+                    ->after(function ($record, $replica) {
+                        $replica->exams()->sync($record->exams()->pluck('exams.id'));
+                    })
+                    ->successNotificationTitle('Paket berhasil diduplikat, tinggal ubah exam-nya'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

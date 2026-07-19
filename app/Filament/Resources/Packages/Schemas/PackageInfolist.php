@@ -12,17 +12,35 @@ class PackageInfolist
         return $schema
             ->components([
                 TextEntry::make('program.name')
-                    ->label('Program'),
+                    ->label('Program')
+                    ->placeholder('-'),
+                TextEntry::make('subject.name')
+                    ->label('Mata Pelajaran')
+                    ->placeholder('-'),
                 TextEntry::make('name'),
                 TextEntry::make('type')
                     ->badge(),
                 TextEntry::make('price')
-                    ->money(),
+                    ->money('IDR'),
                 TextEntry::make('discount_price')
-                    ->money()
+                    ->money('IDR')
                     ->placeholder('-'),
                 TextEntry::make('duration_days')
-                    ->numeric(),
+                    ->label('Durasi Akses (hari)')
+                    ->numeric()
+                    ->placeholder('Akses selamanya (lifetime)'),
+                TextEntry::make('features')
+                    ->label('Fitur Paket')
+                    ->listWithLineBreaks()
+                    ->bulleted()
+                    ->placeholder('-')
+                    ->columnSpanFull(),
+                TextEntry::make('materi')
+                    ->label('Daftar Materi')
+                    ->listWithLineBreaks()
+                    ->bulleted()
+                    ->placeholder('-')
+                    ->columnSpanFull(),
                 TextEntry::make('description')
                     ->placeholder('-')
                     ->columnSpanFull(),
