@@ -76,32 +76,19 @@ class PackageController extends Controller
     }
 
     /**
-     * GET /api/packages/{package}/focus-topics
-     * Daftar Exam yang ditandai "Latihan Fokus" (satu topik/kategori saja)
-     * di dalam paket ini -- dipakai untuk section "Latihan Fokus" di Beranda
-     * dan halaman paket, ditampilkan di atas daftar try out lengkap.
+     * GET /api/packages/focus-topics
+     * Daftar Package yang ditandai "Fokus 1 Topik" (is_focus_topic = true) --
+     * dipakai untuk section "Latihan Fokus" di Beranda, ditampilkan di atas
+     * daftar paket try out lengkap. Berbeda dari index()/recommended() yang
+     * nampilin semua jenis paket, endpoint ini khusus paket fokus topik saja.
      */
-    public function focusTopics(Package $package)
+    public function focusTopics(Request $request)
     {
-        $topics = $package->exams()
-            ->where('is_focus_practice', true)
-            ->with('sections.category')
-            ->withCount('questions')
-            ->get()
-            ->map(function ($exam) {
-                $section = $exam->sections->first();
-
-                return [
-                    'exam_id' => $exam->id,
-                    'title' => $exam->title,
-                    'category_code' => $section?->category?->code,
-                    'category_name' => $section?->category?->name,
-                    'question_count' => $exam->questions_count,
-                    'duration_minutes' => $exam->duration_minutes,
-                ];
-            });
-
-        return response()->json($topics);
+        return Package::with('program', 'subject')
+            ->where('is_focus_topic', true)
+            ->when($request->filled('program_id'), fn ($q) => $q->where('program_id', $request->program_id))
+            ->latest()
+            ->get();
     }
 
     /**
