@@ -20,7 +20,6 @@ class Exam extends Model
         'require_all_sections_pass',
         'is_free_preview',
         'uses_section_timers',
-        'is_focus_practice',
     ];
 
     protected function casts(): array
@@ -29,7 +28,6 @@ class Exam extends Model
             'is_free_preview' => 'boolean',
             'require_all_sections_pass' => 'boolean',
             'uses_section_timers' => 'boolean',
-            'is_focus_practice' => 'boolean',
         ];
     }
 
