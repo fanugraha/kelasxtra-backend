@@ -46,6 +46,10 @@ class PackageForm
                     ])
                     ->required()
                     ->live(),
+                Toggle::make('is_focus_topic')
+                    ->label('Paket Fokus 1 Topik')
+                    ->helperText('Aktifkan kalau paket ini jual latihan soal 1 kategori saja (mis. khusus TWK/TIU/TKP), bukan gabungan semua topik. Akan ditampilkan di section "Latihan Fokus" di Beranda, terpisah dari paket try out lengkap.')
+                    ->default(false),
                 Select::make('exams')
                     ->label('Exam/Ujian yang Dijual')
                     ->relationship('exams', 'title')
