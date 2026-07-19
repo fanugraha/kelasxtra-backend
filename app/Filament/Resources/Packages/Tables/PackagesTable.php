@@ -7,6 +7,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ReplicateAction;
 use Filament\Actions\ViewAction;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
@@ -28,6 +29,9 @@ class PackagesTable
                     ->searchable(),
                 TextColumn::make('type')
                     ->badge(),
+                IconColumn::make('is_focus_topic')
+                    ->label('Fokus Topik')
+                    ->boolean(),
                 TextColumn::make('price')
                     ->money('IDR')
                     ->sortable(),
