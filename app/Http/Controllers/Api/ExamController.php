@@ -150,7 +150,7 @@ class ExamController extends Controller
 
             return $newAttempt;
         });
-        return new ExamAttemptResource($attempt->load('exam.questions.options'));
+        return new ExamAttemptResource($attempt->load('exam.questions.options', 'exam.questions.category'));
     }
 
     /**
@@ -446,7 +446,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
 
         $this->autoSubmitIfExpired($attempt);
 
-        return new ExamAttemptResource($attempt->fresh(['exam.questions.options', 'exam.sections', 'answers', 'sectionScores']));
+        return new ExamAttemptResource($attempt->fresh(['exam.questions.options', 'exam.questions.category', 'exam.sections', 'answers', 'sectionScores']));
     }
 
     /**
@@ -542,7 +542,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
             ], 422);
         }
 
-        $attempt->load(['exam.questions.options', 'answers']);
+        $attempt->load(['exam.questions.options', 'exam.questions.category', 'answers']);
 
         $questions = $attempt->exam->questions->map(function ($question) use ($attempt) {
             $answer = $attempt->answers->firstWhere('question_id', $question->id);
@@ -554,10 +554,16 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 'media_type' => $question->media_type,
                 'media_url' => $question->media_url,
                 'type' => $question->type,
+                'topic' => $question->category?->name,
+                'category' => $question->category ? [
+                    'code' => $question->category->code,
+                    'name' => $question->category->name,
+                ] : null,
                 'explanation' => $question->explanation,
                 'options' => $question->options->map(fn ($opt) => [
                     'id' => $opt->id,
                     'option_text' => $opt->option_text,
+                    'image_url' => $opt->image_url,
                     'is_correct' => $opt->is_correct,
                 ])->values(),
                 'selected_option_id' => $answer?->selected_option_id,

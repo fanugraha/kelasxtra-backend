@@ -9,6 +9,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -61,10 +62,18 @@ class QuestionsRelationManager extends RelationManager
                 ->live()
                 ->required(),
 
+            FileUpload::make('media_url')
+                ->label('File Media')
+                ->image()
+                ->directory('question-media')
+                ->maxSize(2048)
+                ->visible(fn (Get $get) => $get('media_type') === 'image')
+                ->columnSpanFull(),
+
             TextInput::make('media_url')
-                ->label('URL Media')
-                ->helperText('Path atau URL file gambar/audio, misal: /storage/questions/soal-1.png')
-                ->visible(fn (Get $get) => $get('media_type') !== 'none')
+                ->label('URL Audio')
+                ->helperText('Path atau URL file audio, misal: /storage/questions/audio-1.mp3')
+                ->visible(fn (Get $get) => $get('media_type') === 'audio')
                 ->columnSpanFull(),
 
             Select::make('type')
@@ -98,6 +107,12 @@ class QuestionsRelationManager extends RelationManager
                     TextInput::make('option_text')
                         ->label('Teks Opsi')
                         ->required()
+                        ->columnSpan(2),
+                    FileUpload::make('image_url')
+                        ->label('Gambar Opsi (opsional)')
+                        ->image()
+                        ->directory('question-option-images')
+                        ->maxSize(2048)
                         ->columnSpan(2),
                     Toggle::make('is_correct')
                         ->label('Benar?'),

@@ -66,13 +66,18 @@ class ExamAttemptResource extends JsonResource
                     ->map(fn ($q) => [
                     'id' => $q->id,
                     'question_text' => $q->question_text,
-                    'image_url' => $q->image_url,
+                    'media_type' => $q->media_type,
+                    'media_url' => $q->media_url,
                     'type' => $q->type,
-                    'category' => $q->category,
+                    'category' => $q->category ? [
+                        'code' => $q->category->code,
+                        'name' => $q->category->name,
+                    ] : null,
                     'options' => $q->type === 'pg'
                         ? $q->options->map(fn ($o) => [
                             'id' => $o->id,
                             'option_text' => $o->option_text,
+                            'image_url' => $o->image_url,
                         ])
                         : [],
                 ])->values()
