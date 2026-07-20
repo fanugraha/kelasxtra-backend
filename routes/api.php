@@ -83,10 +83,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/materials/{material}', [MaterialController::class, 'show']);
 
     // Pembelian & Riwayat Transaksi
-    Route::post('/transactions/checkout', [TransactionController::class, 'checkout']);
+    Route::post('/transactions/checkout', [TransactionController::class, 'checkout'])
+        ->middleware('throttle:10,1'); // section 11: cegah spam checkout ke Midtrans
     Route::get('/transactions', [TransactionController::class, 'index']);
     Route::get('/transactions/{transaction}', [TransactionController::class, 'show']);
-    Route::post('/transactions/{transaction}/resume', [TransactionController::class, 'resume']);
+    Route::post('/transactions/{transaction}/resume', [TransactionController::class, 'resume'])
+        ->middleware('throttle:10,1'); // section 11: cegah spam resume ke Midtrans
 
 
     // Exam Engine — Melayani latihan soal & try out batch sekaligus
