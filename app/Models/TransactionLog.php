@@ -16,6 +16,8 @@ class TransactionLog extends Model
     protected $fillable = [
         'transaction_id',
         'raw_payload',
+        'source',
+        'changed_by',
         'created_at',
     ];
 
