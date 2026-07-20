@@ -106,10 +106,26 @@ class QuestionsRelationManager extends RelationManager
                     ->importer(QuestionImporter::class)
                     ->options(fn () => ['exam_id' => $this->getOwnerRecord()->getKey()])
                     ->maxRows(1000)
-                    ->chunkSize(50),
+                    ->chunkSize(50)
+                    ->before(function () {
+                        if ($this->getOwnerRecord()->sections()->doesntExist()) {
+                            Notification::make()
+                                ->title('Ingat: Exam ini belum punya Bagian Ujian (section)')
+                                ->body('Soal yang diimpor tidak akan otomatis ke-assign section. Kalau exam ini seharusnya pakai section, buat section-nya dulu lalu jalankan "Assign Section dari Kategori" setelah import.')
+                                ->warning()
+                                ->persistent()
+                                ->send();
+                        }
+                    }),
                 AttachAction::make()
                     ->label('Attach Soal Existing')
                     ->recordSelectSearchColumns(['question_text'])
+                    ->modalDescription(function () {
+                        if ($this->getOwnerRecord()->sections()->doesntExist()) {
+                            return 'Exam ini belum punya Bagian Ujian (section) sama sekali. Kalau memang didesain tanpa section (exam 1-topik), silakan lanjut. Kalau seharusnya pakai section, batalkan dulu dan buat section-nya lewat tab "Bagian Ujian" sebelum attach soal.';
+                        }
+                        return null;
+                    })
                     ->schema(fn (AttachAction $action) => [
                         $action->getRecordSelect(),
                         Select::make('exam_section_id')
@@ -129,6 +145,7 @@ class QuestionsRelationManager extends RelationManager
                     BulkAction::make('setPointsMassal')
                         ->label('Set Poin Massal')
                         ->color('warning')
+                        ->modalDescription('Ini mengubah POIN LEVEL-EXAM (tersimpan di pivot exam_questions, dipakai sebagai bobot soal saat penilaian TWK/TIU/essay). Ini BUKAN poin di opsi jawaban (dipakai khusus untuk soal TKP berbasis weighted_options) -- itu diatur terpisah lewat menu Bank Soal.')
                         ->schema([
                             TextInput::make('points')
                                 ->label('Poin per Soal')

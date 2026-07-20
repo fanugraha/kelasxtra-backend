@@ -5,11 +5,14 @@ namespace App\Filament\Resources\ExamResource\Pages;
 use App\Filament\Resources\ExamResource;
 use App\Models\Exam;
 use App\Models\Question;
+use App\Filament\Resources\ExamResource\Concerns\ResolvesExamSectionForQuestion;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreateExam extends CreateRecord
 {
+    use ResolvesExamSectionForQuestion;
+
     protected static string $resource = ExamResource::class;
 
     protected function afterCreate(): void
@@ -37,12 +40,10 @@ class CreateExam extends CreateRecord
             return;
         }
 
-        $sectionByCategory = $exam->sections()->get(['id', 'category_id'])->keyBy('category_id');
+        $sectionByCategory = $this->sectionsByCategory($exam);
 
         $syncData = $questions->mapWithKeys(function ($question) use ($sectionByCategory) {
-            $sectionId = $question->category_id
-                ? $sectionByCategory->get($question->category_id)?->id
-                : null;
+            $sectionId = $this->resolveSectionId($question->category_id, $sectionByCategory);
 
             return [$question->id => ['points' => 1, 'exam_section_id' => $sectionId]];
         })->all();

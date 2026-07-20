@@ -40,44 +40,24 @@ class ExamAttempt extends Model
     }
 
     /**
-     * Hitung ulang skor total attempt secara aman (Mendukung TKP & Essay)
+     * Hitung ulang skor total attempt setelah tutor menilai essay (lihat
+     * TutorGradingController::grade()). Sekarang delegasi ke ExamScoringService
+     * -- rumus yang SAMA PERSIS dengan yang dipakai saat siswa submit
+     * (ExamController::gradeAndClose()). Sebelumnya fungsi ini punya rumus
+     * sendiri yang salah untuk soal single_correct (TWK/TIU): lihat
+     * ExamScoringService untuk penjelasan bug-nya.
      */
     public function recalculateScore(): void
     {
-        // Eager load answers beserta question dan options untuk efisiensi database
-        $answers = $this->answers()->with('question.options')->get();
-        $examQuestions = $this->exam->questions;
-
-        $score = 0;
-        $correctCount = 0;
-
-        foreach ($answers as $ans) {
-            if ($ans->question->type === 'pg') {
-                // Ambil poin langsung dari opsi pilihan siswa (Mendukung TKP & PG Biasa)
-                $selectedOption = $ans->question->options->firstWhere('id', $ans->selected_option_id);
-                $points = $selectedOption->points ?? 0;
-                $score += $points;
-
-                if ($selectedOption && $selectedOption->is_correct) {
-                    $correctCount++;
-                }
-            } elseif ($ans->question->type === 'essay') {
-                // Soal essay dinilai berdasarkan bobot di pivot exam_questions jika benar
-                if ($ans->is_correct) {
-                    $points = $examQuestions->firstWhere('id', $ans->question_id)?->pivot->points ?? 0;
-                    $score += $points;
-                    $correctCount++;
-                }
-            }
-        }
-
-        // Cek apakah masih ada esai yang belum dinilai oleh tutor
-        $hasPendingEssay = $answers->where('question.type', 'essay')->whereNull('is_correct')->isNotEmpty();
+        $result = app(\App\Services\ExamScoringService::class)->scoreAndPersist($this);
 
         $this->update([
-            'score' => $score,
-            'correct_count' => $correctCount,
-            'status' => $hasPendingEssay ? 'submitted' : 'graded',
+            'score' => $result['score'],
+            'correct_count' => $result['correct_count'],
+            // Kalau masih ada essay pending, pertahankan status attempt yang
+            // lama (submitted/auto_submitted) -- jangan dipaksa 'submitted'
+            // seperti versi sebelumnya, supaya asal status tidak hilang.
+            'status' => $result['has_pending_essay'] ? $this->status : 'graded',
         ]);
     }
 

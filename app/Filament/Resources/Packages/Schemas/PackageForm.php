@@ -48,15 +48,18 @@ class PackageForm
                     ->live(),
                 Toggle::make('is_focus_topic')
                     ->label('Paket Fokus 1 Topik')
-                    ->helperText('Aktifkan kalau paket ini jual latihan soal 1 kategori saja (mis. khusus TWK/TIU/TKP), bukan gabungan semua topik. Akan ditampilkan di section "Latihan Fokus" di Beranda, terpisah dari paket try out lengkap.')
+                    ->live()
+                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal')
+                    ->dehydrateStateUsing(fn (Get $get, $state) => $get('type') === 'latihan_soal' ? $state : false)
+                    ->helperText('Aktifkan kalau paket ini jual latihan soal 1 kategori saja (mis. khusus TWK/TIU/TKP), bukan gabungan semua topik. Akan ditampilkan di section "Latihan Fokus" di Beranda, terpisah dari paket try out lengkap. Hanya tersedia untuk tipe paket "Latihan soal".')
                     ->default(false),
                 Select::make('category_id')
                     ->label('Topik Fokus')
                     ->relationship('category', 'name')
                     ->searchable()
                     ->preload()
-                    ->visible(fn (Get $get) => $get('is_focus_topic'))
-                    ->required(fn (Get $get) => $get('is_focus_topic'))
+                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic'))
+                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic'))
                     ->options(function (Get $get) {
                         $programId = $get('program_id');
 
@@ -71,20 +74,52 @@ class PackageForm
                     ->multiple()
                     ->searchable()
                     ->preload()
+                    ->live()
                     ->visible(fn (Get $get) => $get('type') === 'latihan_soal')
                     ->required(fn (Get $get) => $get('type') === 'latihan_soal')
                     ->options(function (Get $get) {
                         $programId = $get('program_id');
                         $subjectId = $get('subject_id');
+                        $isFocusTopic = $get('is_focus_topic');
+                        $categoryId = $get('category_id');
 
                         return Exam::query()
                             ->with('bank')
                             ->when($programId, fn ($q) => $q->whereHas('bank', fn ($b) => $b->where('program_id', $programId)))
                             ->when($subjectId, fn ($q) => $q->whereHas('bank', fn ($b) => $b->where('subject_id', $subjectId)))
+                            // Paket Fokus 1 Topik: exam yang muncul HARUS exam 1-topik yang section-nya
+                            // cocok Topik Fokus -- jangan sampai admin bisa masukkan exam gabungan 3
+                            // materi ke paket yang katanya "fokus 1 topik".
+                            ->when($isFocusTopic && $categoryId, fn ($q) => $q
+                                ->whereHas('sections', fn ($s) => $s->where('category_id', $categoryId))
+                                ->whereDoesntHave('sections', fn ($s) => $s->where('category_id', '!=', $categoryId)->orWhereNull('category_id')))
                             ->get()
                             ->mapWithKeys(fn ($exam) => [$exam->id => $exam->title . ' (' . $exam->bank->title . ')']);
                     })
-                    ->helperText('Pilih exam/ujian mana saja yang akan dibuka aksesnya untuk siswa yang membeli paket ini. Exam yang tidak dipilih di sini TIDAK akan bisa diakses meski satu bank soal.'),
+                    ->helperText(function (Get $get) {
+                        $default = 'Pilih exam/ujian mana saja yang akan dibuka aksesnya untuk siswa yang membeli paket ini. Exam yang tidak dipilih di sini TIDAK akan bisa diakses meski satu bank soal.';
+
+                        if ($get('is_focus_topic')) {
+                            return $default . ' Daftar di atas sudah difilter: hanya exam 1-topik yang sesuai Topik Fokus yang muncul.';
+                        }
+
+                        $selectedIds = $get('exams') ?? [];
+                        if (empty($selectedIds)) {
+                            return $default;
+                        }
+
+                        $withoutFullPass = Exam::whereIn('id', $selectedIds)
+                            ->where('require_all_sections_pass', false)
+                            ->pluck('title');
+
+                        if ($withoutFullPass->isNotEmpty()) {
+                            return $default . ' PERINGATAN: exam berikut tidak mewajibkan "lulus semua bagian" -- '
+                                . $withoutFullPass->implode(', ')
+                                . '. Kalau paket ini try out gabungan, pertimbangkan aktifkan pengaturan itu di masing-masing Exam supaya penilaian konsisten.';
+                        }
+
+                        return $default;
+                    }),
                 TextInput::make('price')
                     ->required()
                     ->numeric()

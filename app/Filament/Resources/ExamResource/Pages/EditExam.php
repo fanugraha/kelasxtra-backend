@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ExamResource\Pages;
 
 use App\Filament\Resources\ExamResource;
 use App\Models\Exam;
+use App\Filament\Resources\ExamResource\Concerns\ResolvesExamSectionForQuestion;
 use App\Models\Question;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
@@ -11,6 +12,8 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditExam extends EditRecord
 {
+    use ResolvesExamSectionForQuestion;
+
     protected static string $resource = ExamResource::class;
 
     protected array $pendingBankIds = [];
@@ -74,14 +77,26 @@ class EditExam extends EditRecord
             return;
         }
 
-        $questionIdsToKeep = Question::whereIn('bank_id', $bankIds)->pluck('id');
+        $questions = Question::whereIn('bank_id', $bankIds)->get(['id', 'category_id']);
+        $questionIdsToKeep = $questions->pluck('id');
         $currentlyAttached = $exam->questions()->pluck('questions.id');
 
-        $toAttach = $questionIdsToKeep->diff($currentlyAttached);
+        $toAttachIds = $questionIdsToKeep->diff($currentlyAttached);
         $toDetach = $currentlyAttached->diff($questionIdsToKeep);
 
-        if ($toAttach->isNotEmpty()) {
-            $syncData = $toAttach->mapWithKeys(fn ($id) => [$id => ['points' => 1, 'exam_section_id' => null]])->all();
+        if ($toAttachIds->isNotEmpty()) {
+            // Auto-match exam_section_id dari category_id soal, sama seperti
+            // CreateExam -- SEBELUMNYA di sini exam_section_id selalu di-null-kan,
+            // itu penyebab soal yang ditambahkan lewat Edit selalu "kosong section".
+            $sectionByCategory = $this->sectionsByCategory($exam);
+            $questionsToAttach = $questions->whereIn('id', $toAttachIds);
+
+            $syncData = $questionsToAttach->mapWithKeys(function ($question) use ($sectionByCategory) {
+                $sectionId = $this->resolveSectionId($question->category_id, $sectionByCategory);
+
+                return [$question->id => ['points' => 1, 'exam_section_id' => $sectionId]];
+            })->all();
+
             $exam->questions()->attach($syncData);
         }
 
@@ -89,9 +104,9 @@ class EditExam extends EditRecord
             $exam->questions()->detach($toDetach);
         }
 
-        if ($toAttach->isNotEmpty() || $toDetach->isNotEmpty()) {
+        if ($toAttachIds->isNotEmpty() || $toDetach->isNotEmpty()) {
             Notification::make()
-                ->title("Bank soal diperbarui: {$toAttach->count()} soal ditambahkan, {$toDetach->count()} soal dilepas.")
+                ->title("Bank soal diperbarui: {$toAttachIds->count()} soal ditambahkan, {$toDetach->count()} soal dilepas.")
                 ->success()
                 ->send();
         }

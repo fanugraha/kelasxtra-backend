@@ -120,7 +120,7 @@ class QuestionsRelationManager extends RelationManager
                         ->label('Poin')
                         ->numeric()
                         ->default(0)
-                        ->helperText('Untuk TKP: tiap opsi bisa punya poin beda'),
+                        ->helperText('Poin ini HANYA dipakai untuk section bertipe "weighted_options" (biasanya TKP) -- tiap opsi boleh punya poin sendiri (mis. 1-5), tidak ada opsi "salah". Untuk section bertipe "single_correct" (biasanya TWK/TIU), kolom ini DIABAIKAN saat penilaian -- bobot soal untuk section itu diatur lewat "Poin" di halaman Exam (panel Soal dalam Exam Ini), bukan di sini.'),
                 ])
                 ->columns(4)
                 ->defaultItems(4)

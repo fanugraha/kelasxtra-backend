@@ -83,6 +83,14 @@ class ExamResource extends Resource
                 TextColumn::make('duration_minutes')->suffix(' menit'),
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
                 IconColumn::make('is_free_preview')->label('Free Preview')->boolean(),
+                TextColumn::make('orphan_questions_count')
+                    ->label('Soal Tanpa Bagian')
+                    ->getStateUsing(fn (Exam $record) => $record->questions()
+                        ->wherePivotNull('exam_section_id')
+                        ->count())
+                    ->badge()
+                    ->color(fn (int $state) => $state > 0 ? 'danger' : 'success')
+                    ->tooltip('Jumlah soal di exam ini yang belum ter-assign ke Bagian Ujian (section) manapun.'),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);

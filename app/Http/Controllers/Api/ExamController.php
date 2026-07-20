@@ -790,92 +790,18 @@ public function forPackage(Request $request, \App\Models\Package $package)
         // tidak disentuh oleh trigger ini.
         $isPracticeExam = $attempt->exam_batch_id === null;
 
-        DB::transaction(function () use ($attempt, $status) {
-            $answers = $attempt->answers()->with('question.options')->get();
-            $examQuestions = $attempt->exam->questions; // pivot: points, exam_section_id
-            $sections = $attempt->exam->sections->keyBy('id');
+        // Logic scoring diekstrak ke ExamScoringService supaya SAMA PERSIS
+        // dengan yang dipakai ExamAttempt::recalculateScore() (dipanggil ulang
+        // setelah tutor menilai essay) -- sebelumnya dua tempat ini pakai
+        // rumus berbeda, lihat komentar di ExamScoringService untuk detail bug-nya.
+        $result = app(\App\Services\ExamScoringService::class)->scoreAndPersist($attempt);
 
-            $score = 0;
-            $correctCount = 0;
-            $hasPendingEssay = false;
-            $sectionTotals = [];
-
-            foreach ($answers as $answer) {
-                $pivot = $examQuestions->firstWhere('id', $answer->question_id)?->pivot;
-                $sectionId = $pivot?->exam_section_id;
-
-                if ($answer->question->type === 'essay') {
-                    if ($answer->needs_manual_grading) {
-                        $hasPendingEssay = true;
-                        continue;
-                    }
-
-                    if ($answer->is_correct) {
-                        $points = $pivot->points ?? 0;
-                        $score += $points;
-                        $correctCount++;
-
-                        if ($sectionId) {
-                            $sectionTotals[$sectionId]['score'] = ($sectionTotals[$sectionId]['score'] ?? 0) + $points;
-                            $sectionTotals[$sectionId]['correct'] = ($sectionTotals[$sectionId]['correct'] ?? 0) + 1;
-                        }
-                    }
-                    continue;
-                }
-
-                // soal pg: cabang berbeda tergantung scoring_type section.
-                // - weighted_options (TKP): tiap opsi punya points sendiri (1-5),
-                //   tidak ada "salah" -- selectedOption->points dipakai langsung.
-                // - single_correct (TWK/TIU, default): opsi benar dicek via
-                //   is_correct, poin diambil dari bobot soal di pivot exam_questions,
-                //   fallback 1 poin kalau bobot belum diisi.
-                $selectedOption = $answer->question->options->firstWhere('id', $answer->selected_option_id);
-                $scoringType = $sections->get($sectionId)?->scoring_type;
-
-                if ($scoringType === 'weighted_options') {
-                    $points = $selectedOption->points ?? 0;
-                    $isCorrect = $points > 0;
-                } else {
-                    $isCorrect = (bool) ($selectedOption->is_correct ?? false);
-                    $points = $isCorrect ? ($pivot->points ?? 1) : 0;
-                }
-
-                $answer->update(['is_correct' => $isCorrect]);
-
-                $score += $points;
-                if ($isCorrect) {
-                    $correctCount++;
-                }
-
-                if ($sectionId) {
-                    $sectionTotals[$sectionId]['score'] = ($sectionTotals[$sectionId]['score'] ?? 0) + $points;
-                    $sectionTotals[$sectionId]['correct'] = ($sectionTotals[$sectionId]['correct'] ?? 0) + ($isCorrect ? 1 : 0);
-                }
-            }
-
-            foreach ($sectionTotals as $sectionId => $totals) {
-                $section = $sections->get($sectionId);
-                $passed = $section?->min_passing_score !== null
-                    ? $totals['score'] >= $section->min_passing_score
-                    : null;
-
-                ExamAttemptSectionScore::updateOrCreate(
-                    ['exam_attempt_id' => $attempt->id, 'exam_section_id' => $sectionId],
-                    [
-                        'raw_score' => $totals['score'],
-                        'correct_count' => $totals['correct'],
-                        'passed_threshold' => $passed,
-                    ]
-                );
-            }
-
-            $attempt->update([
-                'status' => $hasPendingEssay ? $status : 'graded',
-                'score' => $score,
-                'correct_count' => $correctCount,
-                'finished_at' => now(),
-            ]);
-        });
+        $attempt->update([
+            'status' => $result['has_pending_essay'] ? $status : 'graded',
+            'score' => $result['score'],
+            'correct_count' => $result['correct_count'],
+            'finished_at' => now(),
+        ]);
 
         // Leaderboard mingguan latihan soal di-generate ulang INSTAN begitu
         // attempt-nya final (skor sudah pasti, tidak ada essay pending) --
