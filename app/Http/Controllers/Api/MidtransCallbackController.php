@@ -39,8 +39,10 @@ class MidtransCallbackController extends Controller
                 return response()->json(['message' => 'Transaction tidak ditemukan'], 404);
             }
 
+            // source='webhook' membedakannya dari perubahan manual admin.
             $transaction->logs()->create([
-                'raw_payload' => $payload
+                'raw_payload' => $payload,
+                'source' => 'webhook',
             ]);
 
             // capture+challenge = masih menunggu review fraud manual, jangan

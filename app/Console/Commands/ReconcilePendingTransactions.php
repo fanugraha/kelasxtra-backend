@@ -48,12 +48,18 @@ class ReconcilePendingTransactions extends Command
             in_array($transactionStatus, ['capture', 'settlement']) => 'success',
             in_array($transactionStatus, ['deny', 'cancel']) => 'failed',
             $transactionStatus === 'expire' => 'expired',
+            in_array($transactionStatus, ['refund', 'partial_refund']) => 'refunded',
             default => null,
         };
 
         if ($newStatus === null) {
             return;
         }
+
+        $transaction->logs()->create([
+            'raw_payload' => $payload,
+            'source' => 'reconcile',
+        ]);
 
         $transaction->update([
             'status' => $newStatus,

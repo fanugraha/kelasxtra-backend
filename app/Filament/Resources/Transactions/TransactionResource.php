@@ -57,9 +57,26 @@ class TransactionResource extends Resource
             ->requiresConfirmation()
             ->modalDescription('Transaksi akan ditandai sukses, dan enrollment terkait (jika ada) akan diaktifkan otomatis. Gunakan ini kalau siswa sudah bayar tapi status belum ter-update otomatis.')
             ->action(function (Transaction $record) {
+                $fromStatus = $record->status;
+
                 $record->update([
                     'status' => 'success',
                     'paid_at' => $record->paid_at ?? now(),
+                ]);
+
+                // Action ini berdiri sendiri (bukan bagian dari form submission
+                // EditRecord), jadi beforeSave()/afterSave() di EditTransaction
+                // TIDAK ikut jalan. Audit trail dicatat langsung di sini supaya
+                // tombol ini juga tercatat sebagai perubahan manual admin.
+                $record->logs()->create([
+                    'raw_payload' => [
+                        'from_status' => $fromStatus,
+                        'to_status' => 'success',
+                        'changed_by_name' => auth()->user()?->name,
+                        'via' => 'markSuccessAction',
+                    ],
+                    'source' => 'admin_manual',
+                    'changed_by' => auth()->id(),
                 ]);
 
                 $hasEnrollment = $record->fresh()->enrollment !== null;
