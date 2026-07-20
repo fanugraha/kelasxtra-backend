@@ -84,9 +84,7 @@ class PackageForm
                         $categoryId = $get('category_id');
 
                         return Exam::query()
-                            ->with('bank')
-                            ->when($programId, fn ($q) => $q->whereHas('bank', fn ($b) => $b->where('program_id', $programId)))
-                            ->when($subjectId, fn ($q) => $q->whereHas('bank', fn ($b) => $b->where('subject_id', $subjectId)))
+                            ->when($programId, fn ($q) => $q->where('program_id', $programId))
                             // Paket Fokus 1 Topik: exam yang muncul HARUS exam 1-topik yang section-nya
                             // cocok Topik Fokus -- jangan sampai admin bisa masukkan exam gabungan 3
                             // materi ke paket yang katanya "fokus 1 topik".
@@ -94,7 +92,7 @@ class PackageForm
                                 ->whereHas('sections', fn ($s) => $s->where('category_id', $categoryId))
                                 ->whereDoesntHave('sections', fn ($s) => $s->where('category_id', '!=', $categoryId)->orWhereNull('category_id')))
                             ->get()
-                            ->mapWithKeys(fn ($exam) => [$exam->id => $exam->title . ' (' . $exam->bank->title . ')']);
+                            ->mapWithKeys(fn ($exam) => [$exam->id => $exam->title]);
                     })
                     ->helperText(function (Get $get) {
                         $default = 'Pilih exam/ujian mana saja yang akan dibuka aksesnya untuk siswa yang membeli paket ini. Exam yang tidak dipilih di sini TIDAK akan bisa diakses meski satu bank soal.';
