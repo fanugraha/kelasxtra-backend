@@ -3,17 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Transaction;
 use App\Models\Enrollment;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class MidtransCallbackController extends Controller
 {
-    /**
-     * Handle webhook callback dari Midtrans secara idempotent.
-     */
     public function handleCallback(Request $request)
     {
         $payload = $request->all();
@@ -25,7 +22,6 @@ class MidtransCallbackController extends Controller
         $fraudStatus = $payload['fraud_status'] ?? null;
         $type = $payload['payment_type'] ?? null;
 
-        // 1. Validasi SHA512 Signature Key untuk memastikan request asli dari Midtrans
         $serverKey = config('services.midtrans.server_key');
         $signature = hash("sha512", $orderId . $statusCode . $grossAmount . $serverKey);
 
@@ -34,7 +30,6 @@ class MidtransCallbackController extends Controller
             return response()->json(['message' => 'Invalid signature'], 403);
         }
 
-        // 2. Gunakan DB Transaction + Row Locking (lockForUpdate) untuk mencegah race condition
         return DB::transaction(function () use ($orderId, $transactionStatus, $fraudStatus, $type, $payload) {
             $transaction = Transaction::where('midtrans_order_id', $orderId)
                 ->lockForUpdate()
@@ -44,47 +39,56 @@ class MidtransCallbackController extends Controller
                 return response()->json(['message' => 'Transaction tidak ditemukan'], 404);
             }
 
-            // Catat raw payload ke transaction_logs untuk audit trail
             $transaction->logs()->create([
                 'raw_payload' => $payload
             ]);
 
-            // IDEMPOTENCY GUARD: kalau status di DB sudah final (success/failed/expired),
-            // webhook susulan/duplikat tidak boleh mengubah apa pun lagi.
-            if (in_array($transaction->status, ['success', 'failed', 'expired'], true)) {
+            // capture+challenge = masih menunggu review fraud manual, jangan
+            // update status apa pun dulu.
+            if ($transactionStatus === 'capture' && $fraudStatus === 'challenge') {
+                Log::info("Midtrans Callback: Order {$orderId} status capture+challenge, menunggu review fraud manual.");
+                return response()->json(['message' => 'Transaksi menunggu review fraud, belum diproses']);
+            }
+
+            $newStatus = match (true) {
+                $transactionStatus === 'capture' => $fraudStatus === 'accept' ? 'success' : 'failed',
+                $transactionStatus === 'settlement' => 'success',
+                in_array($transactionStatus, ['deny', 'cancel'], true) => 'failed',
+                $transactionStatus === 'expire' => 'expired',
+                in_array($transactionStatus, ['refund', 'partial_refund'], true) => 'refunded',
+                default => null,
+            };
+
+            if ($newStatus === null) {
+                // Status lain (mis. 'pending' dari Midtrans) tidak perlu aksi.
+                return response()->json(['message' => 'Status tidak memerlukan aksi']);
+            }
+
+            // IDEMPOTENCY GUARD: status baru == status lama -> webhook duplikat
+            // murni, tidak ada perubahan, diabaikan.
+            if ($transaction->status === $newStatus) {
                 return response()->json(['message' => 'Webhook sudah diproses sebelumnya (Idempotent)']);
             }
 
-            // 3. Mapping status Midtrans -> status lokal.
-            // Khusus 'capture': status akhirnya tergantung fraud_status dari Midtrans FDS
-            // (Fraud Detection System) -- bukan otomatis sukses.
-            //   - accept    -> sukses
-            //   - challenge -> perlu review manual, JANGAN diaktifkan dulu (skip update)
-            //   - lainnya   -> ditolak sistem fraud, dianggap gagal
-            if ($transactionStatus === 'capture') {
-                if ($fraudStatus === 'challenge') {
-                    Log::info("Midtrans Callback: Order {$orderId} status capture+challenge, menunggu review fraud manual.");
-                    return response()->json(['message' => 'Transaksi menunggu review fraud, belum diproses']);
-                }
-                $newStatus = $fraudStatus === 'accept' ? 'success' : 'failed';
-            } elseif ($transactionStatus === 'settlement') {
-                $newStatus = 'success';
-            } elseif (in_array($transactionStatus, ['deny', 'cancel'])) {
-                $newStatus = 'failed';
-            } elseif ($transactionStatus === 'expire') {
-                $newStatus = 'expired';
-            } else {
-                $newStatus = 'pending';
+            // Blok transisi dari status final (failed/expired/refunded), KECUALI
+            // transisi valid success -> refunded (item 4).
+            $terminal = ['failed', 'expired', 'refunded'];
+            $isValidRefund = $transaction->status === 'success' && $newStatus === 'refunded';
+
+            if (in_array($transaction->status, $terminal, true) && ! $isValidRefund) {
+                Log::warning("Midtrans Callback: Order {$orderId} sudah final ({$transaction->status}), webhook {$newStatus} diabaikan.");
+                return response()->json(['message' => 'Transaksi sudah final, webhook diabaikan']);
             }
 
-            // 4. Update status transaksi
             $transaction->update([
                 'status' => $newStatus,
-                'payment_method' => $type,
-                'paid_at' => $newStatus === 'success' ? now() : null
+                'payment_method' => $type ?? $transaction->payment_method,
+                'paid_at' => $newStatus === 'success' ? now() : $transaction->paid_at,
             ]);
 
-            // 5. Jika pembayaran sukses, buat atau aktifkan Enrollment siswa
+            // Transaction::booted() otomatis mencabut/mengaktifkan enrollment
+            // berdasarkan perubahan status di atas (termasuk untuk 'refunded').
+
             if ($newStatus === 'success') {
                 Enrollment::updateOrCreate(
                     [
@@ -96,12 +100,16 @@ class MidtransCallbackController extends Controller
                         'status' => 'active',
                         'start_date' => now(),
                         'end_date' => $transaction->package->duration_days
-    ? now()->addDays($transaction->package->duration_days)
-    : null,
+                            ? now()->addDays($transaction->package->duration_days)
+                            : null,
                     ]
                 );
 
                 Log::info("Midtrans Callback: Enrollment berhasil diaktifkan untuk Order ID: {$orderId}");
+            }
+
+            if ($newStatus === 'refunded') {
+                Log::info("Midtrans Callback: Order {$orderId} refunded, enrollment dicabut.");
             }
 
             return response()->json(['message' => 'Status transaksi berhasil diperbarui']);

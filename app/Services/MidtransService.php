@@ -6,12 +6,17 @@ use App\Models\Package;
 use App\Models\Promo;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Midtrans\Config;
 use Midtrans\Snap;
 
 class MidtransService
 {
+    // Snap VA/QRIS default kedaluwarsa 24 jam. Kalau config expiry Snap
+    // diubah di dashboard/kode lain, sesuaikan juga nilai ini.
+    protected const SNAP_EXPIRY_HOURS = 24;
+
     public function __construct()
     {
         Config::$serverKey = config('services.midtrans.server_key');
@@ -24,9 +29,6 @@ class MidtransService
     {
         $basePrice = (float) ($package->discount_price ?? $package->price);
 
-        // Pakai Promo::calculateDiscount() (bukan hitung ulang di sini) supaya
-        // aturan cap max_discount_amount ikut diterapkan konsisten dengan
-        // yang ditampilkan ke user pas validateCode().
         $discountAmount = $promo ? $promo->calculateDiscount($package) : 0;
 
         $amount = max($basePrice - $discountAmount, 0);
@@ -37,10 +39,12 @@ class MidtransService
             'package_id' => $package->id,
             'promo_id' => $promo?->id,
             'midtrans_order_id' => $orderId,
+            'invoice_number' => $this->generateInvoiceNumber(),
             'amount' => $amount,
             'discount_amount' => $discountAmount,
             'payment_method' => null,
             'status' => 'pending',
+            'expires_at' => now()->addHours(self::SNAP_EXPIRY_HOURS),
         ]);
 
         $snapToken = Snap::getSnapToken([
@@ -68,13 +72,18 @@ class MidtransService
     }
 
     /**
-     * Generate ulang Snap token untuk transaksi pending. Midtrans MENOLAK
-     * generate token baru dengan order_id yang sudah pernah dipakai
-     * ("order_id sudah digunakan", HTTP 400) — jadi order_id baru dibuat
-     * (turunan dari yang lama + suffix waktu) dan disimpan ke transaksi yang
-     * sama. Baris transaksi tetap satu (tidak ada duplikat di riwayat),
-     * cuma nomor order Midtrans-nya yang berubah. Nominal (amount) yang
-     * sudah didiskon dari checkout awal tetap dipakai apa adanya.
+     * Generate ulang Snap token untuk transaksi pending (dipakai baik untuk
+     * tombol "Lanjutkan Pembayaran" maupun saat checkout() mendeteksi masih
+     * ada transaksi pending untuk paket yang sama).
+     *
+     * order_id baru diturunkan dari order_id ASLI (suffix "-R{HHmmss}" lama
+     * dilucuti dulu sebelum ditambah suffix baru) supaya tidak menumpuk
+     * "-R111111-R222222-R333333..." tiap kali di-resume berulang kali.
+     *
+     * Promo divalidasi ulang: kalau sudah tidak valid lagi (kuota habis /
+     * kedaluwarsa), transaksi tetap dilanjutkan tapi dengan harga normal
+     * (promo dilepas dari transaksi). Keputusan ini bisa direvisi kalau
+     * bisnis mau perilaku lain (menolak resume & minta checkout ulang).
      */
     public function resumeTransaction(Transaction $transaction): string
     {
@@ -82,8 +91,29 @@ class MidtransService
         $package = $transaction->package;
         $amount = (float) $transaction->amount;
 
-        $newOrderId = $transaction->midtrans_order_id.'-R'.now()->format('His');
-        $transaction->update(['midtrans_order_id' => $newOrderId]);
+        if ($transaction->promo_id && $transaction->promo) {
+            $error = $transaction->promo->checkUsableBy($user, $package);
+
+            if ($error) {
+                $amount = (float) ($package->discount_price ?? $package->price);
+
+                $transaction->update([
+                    'promo_id' => null,
+                    'discount_amount' => 0,
+                    'amount' => $amount,
+                ]);
+
+                Log::warning("Resume order {$transaction->midtrans_order_id}: promo sudah tidak valid ({$error}), dilanjutkan dengan harga normal.");
+            }
+        }
+
+        $baseOrderId = preg_replace('/-R\d{6}$/', '', $transaction->midtrans_order_id);
+        $newOrderId = $baseOrderId.'-R'.now()->format('His');
+
+        $transaction->update([
+            'midtrans_order_id' => $newOrderId,
+            'expires_at' => now()->addHours(self::SNAP_EXPIRY_HOURS),
+        ]);
 
         return Snap::getSnapToken([
             'transaction_details' => [
@@ -108,5 +138,25 @@ class MidtransService
     protected function generateOrderId(Package $package): string
     {
         return sprintf('KX-%d-%s-%s', $package->id, now()->format('YmdHis'), Str::upper(Str::random(6)));
+    }
+
+    /**
+     * Format: INV-{YYYYMMDD}-{4 digit sequence per hari}.
+     * Dipanggil di dalam DB transaction checkout() yang sudah lockForUpdate
+     * pada tabel promos; kalau nanti ada race condition di volume tinggi,
+     * pertimbangkan lockForUpdate() eksplisit di query di bawah juga.
+     */
+    protected function generateInvoiceNumber(): string
+    {
+        $prefix = 'INV-'.now()->format('Ymd').'-';
+
+        $lastNumber = Transaction::where('invoice_number', 'like', "{$prefix}%")
+            ->lockForUpdate()
+            ->orderByDesc('invoice_number')
+            ->value('invoice_number');
+
+        $sequence = $lastNumber ? ((int) substr($lastNumber, -4)) + 1 : 1;
+
+        return $prefix.str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
     }
 }

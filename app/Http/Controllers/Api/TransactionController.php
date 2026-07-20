@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Enrollment;
 use App\Models\Package;
 use App\Models\Promo;
 use App\Models\Transaction;
@@ -19,13 +20,6 @@ class TransactionController extends Controller
     /**
      * POST /api/transactions/checkout
      * Body: package_id, promo_code (opsional)
-     * Selalu bikin row transaksi baru (histori "Riwayat Transaksi" tetap lengkap
-     * kalau siswa retry checkout, sesuai section 6 poin 6).
-     *
-     * Promo dicek ulang di sini (bukan cuma di validateCode()) karena kondisi
-     * bisa berubah di antara user validate kode dan user beneran checkout.
-     * lockForUpdate() dipakai supaya 2 checkout bersamaan di detik terakhir
-     * kuota promo tidak sama-sama lolos.
      */
     public function checkout(Request $request)
     {
@@ -37,19 +31,44 @@ class TransactionController extends Controller
         $package = Package::findOrFail($data['package_id']);
         $user = $request->user();
 
-        // Cegah beli ulang paket yang sudah pernah lunas — sekali sukses,
-        // paket itu terkunci selamanya untuk user ini, walau duration_days
-        // sudah lewat. Tidak ada logic re-purchase setelah kadaluarsa.
-        $alreadyOwned = $user->transactions()
-            ->where('package_id', $package->id)
-            ->where('status', 'success')
-            ->exists();
+        $result = DB::transaction(function () use ($data, $package, $user) {
+            // Item 1: cegah transaksi pending ganda untuk paket yang sama.
+            // Midtrans menolak generate token baru untuk order_id yang sama,
+            // jadi kalau ada transaksi pending, kita resume transaksi itu
+            // (dapat order_id + token baru) alih-alih bikin baris baru.
+            $existingPending = Transaction::where('user_id', $user->id)
+                ->where('package_id', $package->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->latest()
+                ->first();
 
-        if ($alreadyOwned) {
-            abort(422, 'Kamu sudah memiliki paket ini.');
-        }
+            if ($existingPending) {
+                return [
+                    'transaction' => $existingPending,
+                    'snap_token' => $this->midtrans->resumeTransaction($existingPending),
+                    'is_new' => false,
+                ];
+            }
 
-        $transaction = DB::transaction(function () use ($data, $package, $user) {
+            // Item 2: cek kepemilikan lewat Enrollment, bukan histori
+            // transaksi sukses. Paket lifetime (duration_days null) terkunci
+            // selamanya begitu punya enrollment. Paket berdurasi boleh dibeli
+            // ulang kalau enrollment-nya sudah tidak aktif lagi.
+            $enrollment = Enrollment::where('user_id', $user->id)
+                ->where('package_id', $package->id)
+                ->first();
+
+            if ($enrollment) {
+                $isLifetime = $package->duration_days === null;
+                $isStillActive = $enrollment->status === 'active'
+                    && (! $enrollment->end_date || $enrollment->end_date->isFuture());
+
+                if ($isLifetime || $isStillActive) {
+                    abort(422, 'Kamu sudah memiliki paket ini.');
+                }
+            }
+
             $promo = null;
 
             if (! empty($data['promo_code'])) {
@@ -65,16 +84,23 @@ class TransactionController extends Controller
                 }
             }
 
-            return $this->midtrans->createTransaction($user, $package, $promo);
+            $transaction = $this->midtrans->createTransaction($user, $package, $promo);
+
+            return [
+                'transaction' => $transaction,
+                'snap_token' => $transaction->snap_token,
+                'is_new' => true,
+            ];
         });
 
-        return response()->json($transaction, 201);
+        $transaction = $result['transaction'];
+        $transaction->setAttribute('snap_token', $result['snap_token']);
+
+        return response()->json($transaction, $result['is_new'] ? 201 : 200);
     }
 
     /**
      * GET /api/transactions
-     * Untuk halaman "Riwayat Transaksi" siswa (section 6 poin 6) — retry
-     * checkout kalau status pending/failed/expired.
      */
     public function index(Request $request)
     {
@@ -83,8 +109,6 @@ class TransactionController extends Controller
 
     /**
      * GET /api/transactions/{transaction}
-     * Polling status transaksi tunggal (webhook Midtrans tidak instan,
-     * frontend perlu cara cek "sudah lunas belum" setelah checkout).
      */
     public function show(Request $request, Transaction $transaction)
     {
@@ -95,8 +119,6 @@ class TransactionController extends Controller
 
     /**
      * POST /api/transactions/{transaction}/resume
-     * Generate ulang Snap token untuk transaksi pending — dipakai tombol
-     * "Lanjutkan Pembayaran" di halaman status transaksi.
      */
     public function resume(Request $request, Transaction $transaction)
     {

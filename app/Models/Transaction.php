@@ -17,11 +17,13 @@ class Transaction extends Model
         'package_id',
         'promo_id',
         'midtrans_order_id',
+        'invoice_number',
         'amount',
         'discount_amount',
         'payment_method',
         'status',
         'paid_at',
+        'expires_at',
     ];
 
     protected function casts(): array
@@ -30,6 +32,7 @@ class Transaction extends Model
             'amount' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'paid_at' => 'datetime',
+            'expires_at' => 'datetime',
         ];
     }
 
@@ -58,9 +61,11 @@ class Transaction extends Model
         return $this->hasOne(Enrollment::class);
     }
 
-    // Sinkronisasi otomatis: apa pun cara admin mengubah status transaksi
-    // (form edit manual, tombol aksi, dsb), enrollment terkait ikut disesuaikan.
-    // success -> akses diberikan (active), failed/expired -> akses dicabut (expired).
+    // Sinkronisasi otomatis: apa pun cara status transaksi berubah (webhook,
+    // reconcile job, atau admin edit manual lewat Filament), enrollment
+    // terkait ikut disesuaikan.
+    // success  -> akses diberikan (active)
+    // failed/expired/refunded -> akses dicabut (expired)
     protected static function booted(): void
     {
         static::updated(function (Transaction $transaction) {
@@ -79,7 +84,7 @@ class Transaction extends Model
                     'status' => 'active',
                     'start_date' => $enrollment->start_date ?? now(),
                 ]),
-                'failed', 'expired' => $enrollment->update([
+                'failed', 'expired', 'refunded' => $enrollment->update([
                     'status' => 'expired',
                 ]),
                 default => null,
