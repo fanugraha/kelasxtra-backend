@@ -14,7 +14,6 @@ class Question extends Model
         'media_url',
         'media_type',
         'passage_id',
-        'category_id',
         'type',
         'difficulty',
         'explanation',
@@ -27,10 +26,6 @@ class Question extends Model
     {
         return $this->hasMany(QuestionOption::class);
     }
-    public function category(): BelongsTo
-    {
-        return $this->belongsTo(Category::class);
-    }
     public function passage(): BelongsTo
     {
         return $this->belongsTo(QuestionPassage::class, 'passage_id');
@@ -38,11 +33,11 @@ class Question extends Model
     public function exam(): BelongsToMany
     {
         return $this->belongsToMany(Exam::class, 'exam_questions')
-            ->withPivot(['points', 'exam_section_id']);
+            ->withPivot(['exam_section_id']);
     }
     public function examSections(): BelongsToMany
     {
         return $this->belongsToMany(ExamSection::class, 'exam_questions', 'question_id', 'exam_section_id')
-            ->withPivot(['exam_id', 'points']);
+            ->withPivot(['exam_id']);
     }
 }

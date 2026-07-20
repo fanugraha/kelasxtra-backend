@@ -16,17 +16,16 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Halaman kerja isi soal per Bank Soal (Paket). Tab dipecah per kategori
- * (TWK/TIU/TKP/dll) sesuai question_bank_sections, dengan progress count
- * vs target di label tab.
+ * Halaman kerja isi soal per Bank Soal. Kategori & tipe penilaian sudah
+ * ditentukan sekali di level Bank Soal itu sendiri (lihat QuestionBankResource),
+ * jadi form soal di sini tidak punya field kategori lagi -- semua soal yang
+ * dibuat di sini otomatis ikut kategori bank-nya.
  */
 class QuestionsRelationManager extends RelationManager
 {
@@ -37,14 +36,9 @@ class QuestionsRelationManager extends RelationManager
     public function form(Schema $schema): Schema
     {
         $bank = $this->getOwnerRecord();
+        $isWeighted = $bank->scoring_type === 'weighted_options';
 
         return $schema->components([
-            Select::make('category_id')
-                ->label('Kategori')
-                ->options($bank->program->categories()->pluck('name', 'id'))
-                ->required()
-                ->searchable(),
-
             Textarea::make('question_text')
                 ->label('Pertanyaan')
                 ->required()
@@ -115,12 +109,14 @@ class QuestionsRelationManager extends RelationManager
                         ->maxSize(2048)
                         ->columnSpan(2),
                     Toggle::make('is_correct')
-                        ->label('Benar?'),
+                        ->label('Benar?')
+                        ->visible(fn () => ! $isWeighted),
                     TextInput::make('points')
                         ->label('Poin')
                         ->numeric()
                         ->default(0)
-                        ->helperText('Poin ini HANYA dipakai untuk section bertipe "weighted_options" (biasanya TKP) -- tiap opsi boleh punya poin sendiri (mis. 1-5), tidak ada opsi "salah". Untuk section bertipe "single_correct" (biasanya TWK/TIU), kolom ini DIABAIKAN saat penilaian -- bobot soal untuk section itu diatur lewat "Poin" di halaman Exam (panel Soal dalam Exam Ini), bukan di sini.'),
+                        ->visible(fn () => $isWeighted)
+                        ->helperText('Bank ini bertipe Weighted Options -- tiap opsi punya poin sendiri (mis. 1-5), tidak ada opsi "salah".'),
                 ])
                 ->columns(4)
                 ->defaultItems(4)
@@ -152,21 +148,5 @@ class QuestionsRelationManager extends RelationManager
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);
-    }
-
-    public function getTabs(): array
-    {
-        $bank = $this->getOwnerRecord();
-        $tabs = [];
-
-        foreach ($bank->sections as $section) {
-            $count = $bank->questions()->where('category_id', $section->category_id)->count();
-            $label = ($section->category->name ?? 'Tanpa Kategori') . " ({$count}/{$section->target_count})";
-
-            $tabs[(string) $section->category_id] = Tab::make($label)
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('category_id', $section->category_id));
-        }
-
-        return $tabs;
     }
 }

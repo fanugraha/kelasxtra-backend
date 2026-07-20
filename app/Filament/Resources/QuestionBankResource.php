@@ -12,6 +12,7 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
@@ -33,16 +34,45 @@ class QuestionBankResource extends Resource
     {
         return $schema->components([
             Select::make('subject_id')
-                ->label('Mapel (opsional)')
+                ->label('Mapel (opsional, untuk latihan soal harian tanpa Program)')
                 ->relationship('subject', 'name')
                 ->searchable()
                 ->preload(),
             Select::make('program_id')
+                ->label('Program')
                 ->relationship('program', 'name')
-                ->required()
                 ->searchable()
-                ->preload(),
+                ->preload()
+                ->live()
+                ->helperText('Isi kalau Bank Soal ini untuk Exam terstruktur (mis. SKD CPNS). Kalau diisi, Kategori di bawah wajib dipilih.'),
+            Select::make('category_id')
+                ->label('Kategori')
+                ->relationship('category', 'name')
+                ->searchable()
+                ->preload()
+                ->required(fn (Get $get) => filled($get('program_id')))
+                ->visible(fn (Get $get) => filled($get('program_id')))
+                ->helperText('Bank Soal ini HANYA akan berisi soal kategori ini (mis. TWK). Untuk kategori lain, buat Bank Soal terpisah.'),
             TextInput::make('title')->required()->maxLength(255),
+            Select::make('scoring_type')
+                ->label('Tipe Penilaian')
+                ->options([
+                    'single_correct' => 'Single Correct (benar/salah, mis. TWK/TIU)',
+                    'weighted_options' => 'Weighted Options (bobot per opsi, mis. TKP)',
+                ])
+                ->live()
+                ->visible(fn (Get $get) => filled($get('program_id'))),
+            TextInput::make('point_correct')
+                ->label('Poin Jika Benar')
+                ->numeric()
+                ->visible(fn (Get $get) => $get('scoring_type') === 'single_correct')
+                ->required(fn (Get $get) => $get('scoring_type') === 'single_correct'),
+            TextInput::make('point_wrong')
+                ->label('Poin Jika Salah')
+                ->numeric()
+                ->default(0)
+                ->visible(fn (Get $get) => $get('scoring_type') === 'single_correct')
+                ->required(fn (Get $get) => $get('scoring_type') === 'single_correct'),
         ]);
     }
 
@@ -53,6 +83,8 @@ class QuestionBankResource extends Resource
                 TextColumn::make('title')->searchable()->sortable(),
                 TextColumn::make('subject.name')->label('Mapel'),
                 TextColumn::make('program.name')->label('Program'),
+                TextColumn::make('category.name')->label('Kategori'),
+                TextColumn::make('scoring_type')->badge(),
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])

@@ -13,7 +13,7 @@ class Exam extends Model
     use HasFactory;
 
     protected $fillable = [
-        'bank_id',
+        'program_id',
         'title',
         'duration_minutes',
         'passing_score',
@@ -31,9 +31,9 @@ class Exam extends Model
         ];
     }
 
-    public function bank(): BelongsTo
+    public function program(): BelongsTo
     {
-        return $this->belongsTo(QuestionBank::class, 'bank_id');
+        return $this->belongsTo(Program::class);
     }
 
     public function sections(): HasMany
@@ -43,8 +43,7 @@ class Exam extends Model
 
     public function questions(): BelongsToMany
     {
-        return $this->belongsToMany(Question::class, 'exam_questions')
-            ->withPivot('points');
+        return $this->belongsToMany(Question::class, 'exam_questions');
     }
 
     public function batches(): HasMany
@@ -60,5 +59,43 @@ class Exam extends Model
     public function attempts(): HasMany
     {
         return $this->hasMany(ExamAttempt::class);
+    }
+
+    /**
+     * Satu-satunya jalur resmi untuk mengisi Exam dari Bank Soal.
+     * Auto-membuat/reuse ExamSection sesuai kategori bank, lalu
+     * menautkan semua soal di bank itu ke section tersebut.
+     */
+    public function attachBank(QuestionBank $bank, array $sectionAttributes = []): ExamSection
+    {
+        if ($bank->program_id !== $this->program_id) {
+            throw new \InvalidArgumentException('Bank Soal harus berasal dari Program yang sama dengan Exam ini.');
+        }
+
+        if (blank($bank->category_id)) {
+            throw new \InvalidArgumentException('Bank Soal ini belum punya kategori, tidak bisa di-attach ke Exam.');
+        }
+
+        $existing = $this->sections()->where('category_id', $bank->category_id)->first();
+
+        if ($existing && $existing->question_bank_id !== $bank->id) {
+            throw new \InvalidArgumentException('Kategori ini sudah diisi oleh Bank Soal lain di Exam ini.');
+        }
+
+        $section = $existing ?? $this->sections()->create(array_merge([
+            'category_id' => $bank->category_id,
+            'question_bank_id' => $bank->id,
+            'code' => $bank->category->code ?? strtoupper(substr($bank->category->name ?? 'SEC', 0, 3)),
+            'name' => $bank->category->name ?? $bank->title,
+            'scoring_type' => $bank->scoring_type,
+        ], $sectionAttributes));
+
+        foreach ($bank->questions()->pluck('id') as $questionId) {
+            $this->questions()->syncWithoutDetaching([
+                $questionId => ['exam_section_id' => $section->id],
+            ]);
+        }
+
+        return $section;
     }
 }

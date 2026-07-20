@@ -2,8 +2,6 @@
 
 namespace App\Filament\Imports;
 
-use App\Models\Exam;
-use App\Models\ExamSection;
 use App\Models\Question;
 use App\Models\QuestionBank;
 use App\Models\QuestionPassage;
@@ -14,28 +12,25 @@ use Filament\Actions\Imports\Models\Import;
 use Filament\Forms\Components\Select;
 use Illuminate\Support\Number;
 
+/**
+ * Import soal SELALU untuk 1 Bank Soal (bank_id datang dari options() saat
+ * importer dipicu dari dalam halaman Bank Soal -- lihat
+ * QuestionBankResource/RelationManagers/QuestionsRelationManager). Kategori
+ * & aturan poin soal ini sudah ditentukan di level Bank Soal itu sendiri,
+ * jadi CSV tidak perlu (dan tidak boleh) punya kolom kategori/poin-exam lagi.
+ * Assignment ke Exam dilakukan terpisah lewat Exam::attachBank() di tab
+ * Bagian Ujian milik Exam, bukan di sini.
+ */
 class QuestionImporter extends Importer
 {
     protected static ?string $model = Question::class;
 
-    /**
-     * Nilai yang dikenali sebagai TRUE/FALSE untuk kolom correct_X.
-     * Kalau isi kolom tidak masuk salah satu list ini (dan tidak kosong),
-     * baris ditolak -- supaya salah ketik tidak diam-diam dianggap "salah".
-     */
     protected const TRUE_VALUES = ['1', 'true', 'ya', 'yes', 'benar'];
     protected const FALSE_VALUES = ['0', 'false', 'tidak', 'no', 'salah'];
 
     public static function getColumns(): array
     {
         return [
-            ImportColumn::make('category')
-                ->label('Kategori (kode)')
-                ->requiredMapping()
-                ->relationship(resolveUsing: 'code')
-                ->rules(['required'])
-                ->example('REA'),
-
             ImportColumn::make('passage_text')
                 ->label('Teks Passage (opsional, isi sama = 1 passage)')
                 ->fillRecordUsing(fn () => null)
@@ -73,12 +68,6 @@ class QuestionImporter extends Importer
                 ->rules(['nullable'])
                 ->example('Karena proses fotosintesis menghasilkan oksigen dan glukosa dari CO2 + air.'),
 
-            ImportColumn::make('points')
-                ->label('Poin Soal Ini di Exam (opsional)')
-                ->rules(['nullable', 'numeric'])
-                ->fillRecordUsing(fn () => null)
-                ->example('5'),
-
             ImportColumn::make('option_1')->label('Opsi 1')->fillRecordUsing(fn () => null)->example('Oxygen and glucose'),
             ImportColumn::make('correct_1')->label('Opsi 1 Benar? (1/0, kosongkan utk TKP)')->fillRecordUsing(fn () => null)->example('1'),
             ImportColumn::make('points_1')->label('Opsi 1 Poin (khusus TKP, 1-5)')->fillRecordUsing(fn () => null)->example('5'),
@@ -102,13 +91,10 @@ class QuestionImporter extends Importer
     }
 
     /**
-     * Field-field yang muncul di modal SEBELUM import dijalankan.
-     * source_bank_id: dipakai kalau import dipicu dari halaman Exam (bank_id belum pasti).
-     * assign_exam_id / assign_exam_section_id: dipakai kalau import dipicu dari halaman
-     * Bank Soal dan user MAU sekalian assign ke exam+section tertentu (opsional).
-     * Kalau import dipicu dari halaman Exam, exam_id sudah otomatis fix lewat context
-     * (lihat ExamResource\RelationManagers\QuestionsRelationManager), field ini tidak akan
-     * dipakai/ditimpa karena context menang.
+     * source_bank_id cuma fallback kalau importer ini dipicu di luar konteks
+     * Bank Soal manapun. Kalau dipicu dari dalam halaman Bank Soal, options()
+     * relation manager sudah otomatis kirim bank_id -- field ini tidak akan
+     * tampil/dipakai karena context menang (lihat getBankId()).
      */
     public static function getOptionsFormComponents(): array
     {
@@ -117,28 +103,7 @@ class QuestionImporter extends Importer
                 ->label('Bank Soal (sumber)')
                 ->options(fn () => QuestionBank::pluck('title', 'id'))
                 ->searchable()
-                ->helperText('Wajib diisi kalau import ini dijalankan dari halaman Exam.'),
-
-            Select::make('assign_exam_id')
-                ->label('Assign ke Exam (opsional)')
-                ->options(fn () => Exam::pluck('title', 'id'))
-                ->searchable()
-                ->live()
-                ->helperText('Kosongkan kalau cuma mau isi bank soal tanpa langsung merakit jadi TO.'),
-
-            Select::make('assign_exam_section_id')
-                ->label('Bagian Ujian (opsional)')
-                ->options(function (\Filament\Schemas\Components\Utilities\Get $get) {
-                    $examId = $get('assign_exam_id');
-
-                    if (blank($examId)) {
-                        return [];
-                    }
-
-                    return ExamSection::where('exam_id', $examId)->pluck('name', 'id');
-                })
-                ->searchable()
-                ->helperText('Kosongkan kalau exam ini tidak memakai pembagian section, atau kalau tidak assign ke exam.'),
+                ->helperText('Wajib diisi kalau import ini dijalankan di luar halaman Bank Soal.'),
         ];
     }
 
@@ -150,33 +115,6 @@ class QuestionImporter extends Importer
     protected function getBankId(): ?int
     {
         return $this->options['bank_id'] ?? $this->options['source_bank_id'] ?? null;
-    }
-
-    protected function getExamId(): ?int
-    {
-        return $this->options['exam_id'] ?? $this->options['assign_exam_id'] ?? null;
-    }
-
-    protected function getExamSectionId(): ?int
-    {
-        $explicit = $this->options['exam_section_id'] ?? $this->options['assign_exam_section_id'] ?? null;
-
-        if ($explicit) {
-            return (int) $explicit;
-        }
-
-        // Auto-match: cari ExamSection di exam ini yang category_id-nya
-        // sama dengan category_id soal yang baru dibuat.
-        $examId = $this->getExamId();
-        $categoryId = $this->record->category_id ?? null;
-
-        if (blank($examId) || blank($categoryId)) {
-            return null;
-        }
-
-        return \App\Models\ExamSection::where('exam_id', $examId)
-            ->where('category_id', $categoryId)
-            ->value('id');
     }
 
     public function resolveRecord(): Question
@@ -205,23 +143,15 @@ class QuestionImporter extends Importer
     {
         if (empty($this->getBankId())) {
             throw new RowImportFailedException(
-                'Bank Soal tidak diketahui. Pilih "Bank Soal (sumber)" di form sebelum import, atau jalankan import ini dari dalam halaman Bank Soal.'
+                'Bank Soal tidak diketahui. Jalankan import ini dari dalam halaman Bank Soal, atau pilih "Bank Soal (sumber)" di form sebelum import.'
             );
         }
 
-        // Validasi opsi jawaban dilakukan SEBELUM record disimpan, supaya baris
-        // yang gagal validasi tidak sempat membuat row Question yatim tanpa opsi.
         if ($this->data['type'] === 'pg') {
             $this->validateOptionsOrFail();
         }
     }
 
-    /**
-     * Parse nilai correct_X secara ketat. Mengembalikan:
-     * - true  : kalau nilai ada di TRUE_VALUES
-     * - false : kalau nilai kosong ATAU ada di FALSE_VALUES
-     * - null  : kalau nilai TERISI tapi tidak dikenali sama sekali (baris harus ditolak)
-     */
     protected function parseCorrectFlag(string $rawValue): ?bool
     {
         $normalized = strtolower(trim($rawValue));
@@ -241,18 +171,6 @@ class QuestionImporter extends Importer
         return null;
     }
 
-    /**
-     * Cek kelengkapan & konsistensi opsi jawaban SEBELUM soal disimpan.
-     * Aturan:
-     * 1. Minimal 2 opsi (option_text) harus terisi.
-     * 2. Kalau ADA kolom points_X yang diisi untuk opsi manapun (mode TKP/bobot),
-     *    tidak wajib ada opsi "benar" -- karena scoring-nya berbasis poin per opsi,
-     *    bukan benar/salah.
-     * 3. Kalau TIDAK ada points_X sama sekali (mode PG biasa), wajib ada MINIMAL
-     *    1 opsi yang ditandai benar (correct_X terisi valid true).
-     * 4. correct_X yang terisi tapi nilainya tidak dikenali (bukan 1/0/ya/tidak/dst)
-     *    membuat baris ditolak, supaya salah ketik tidak lolos diam-diam.
-     */
     protected function validateOptionsOrFail(): void
     {
         $filledCount = 0;
@@ -303,39 +221,28 @@ class QuestionImporter extends Importer
 
     protected function afterCreate(): void
     {
-        if ($this->record->type === 'pg') {
-            for ($i = 1; $i <= 5; $i++) {
-                $optionText = trim((string) ($this->data["option_{$i}"] ?? ''));
-
-                if ($optionText === '') {
-                    continue;
-                }
-
-                $isCorrect = $this->parseCorrectFlag((string) ($this->data["correct_{$i}"] ?? '')) === true;
-
-                $pointsRaw = trim((string) ($this->data["points_{$i}"] ?? ''));
-                $points = $pointsRaw !== '' ? (int) $pointsRaw : 0;
-
-                $this->record->options()->create([
-                    'option_text' => $optionText,
-                    'is_correct' => $isCorrect,
-                    'points' => $points,
-                ]);
-            }
-        }
-
-        $examId = $this->getExamId();
-
-        if (blank($examId)) {
+        if ($this->record->type !== 'pg') {
             return;
         }
 
-        $points = trim((string) ($this->data['points'] ?? ''));
+        for ($i = 1; $i <= 5; $i++) {
+            $optionText = trim((string) ($this->data["option_{$i}"] ?? ''));
 
-        $this->record->exam()->attach($examId, [
-            'exam_section_id' => $this->getExamSectionId(),
-            'points' => $points !== '' ? (int) $points : 1,
-        ]);
+            if ($optionText === '') {
+                continue;
+            }
+
+            $isCorrect = $this->parseCorrectFlag((string) ($this->data["correct_{$i}"] ?? '')) === true;
+
+            $pointsRaw = trim((string) ($this->data["points_{$i}"] ?? ''));
+            $points = $pointsRaw !== '' ? (int) $pointsRaw : 0;
+
+            $this->record->options()->create([
+                'option_text' => $optionText,
+                'is_correct' => $isCorrect,
+                'points' => $points,
+            ]);
+        }
     }
 
     public static function getCompletedNotificationBody(Import $import): string

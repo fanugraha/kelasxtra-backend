@@ -36,13 +36,13 @@ class ExamResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
-            Select::make('bank_id')
-                ->label('Bank Soal untuk Exam Ini')
+            Select::make('program_id')
+                ->label('Program')
                 ->required()
-                ->options(fn () => \App\Models\QuestionBank::pluck('title', 'id'))
+                ->options(fn () => \App\Models\Program::pluck('name', 'id'))
                 ->searchable()
                 ->preload()
-                ->helperText('Satu Exam = satu Bank Soal (mis. "SKD CPNS Part 10"). Untuk menjual beberapa Part sekaligus, kumpulkan beberapa Exam terpisah ke dalam satu Package -- JANGAN gabung banyak bank ke satu Exam, karena passing grade & section per kategori jadi tidak bisa dihitung per Part.'),
+                ->helperText('Exam ini akan berisi soal dari Bank Soal milik Program ini. Setelah Exam dibuat, tambahkan Bank Soal per kategori lewat tab "Bagian Ujian" -> "Attach Bank Soal".'),
             TextInput::make('title')
                 ->required()
                 ->maxLength(255),
@@ -72,25 +72,19 @@ class ExamResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('title')->searchable()->sortable(),
+                TextColumn::make('program.name')->label('Program'),
                 TextColumn::make('bank_soal')
-                    ->label('Bank Soal')
-                    ->getStateUsing(fn (Exam $record) => $record->questions()
-                        ->join('question_banks', 'questions.bank_id', '=', 'question_banks.id')
-                        ->distinct()
-                        ->pluck('question_banks.title')
+                    ->label('Bank Soal Terpasang')
+                    ->getStateUsing(fn (Exam $record) => $record->sections()
+                        ->with('questionBank')
+                        ->get()
+                        ->pluck('questionBank.title')
+                        ->filter()
                         ->implode(', '))
                     ->wrap(),
                 TextColumn::make('duration_minutes')->suffix(' menit'),
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
                 IconColumn::make('is_free_preview')->label('Free Preview')->boolean(),
-                TextColumn::make('orphan_questions_count')
-                    ->label('Soal Tanpa Bagian')
-                    ->getStateUsing(fn (Exam $record) => $record->questions()
-                        ->wherePivotNull('exam_section_id')
-                        ->count())
-                    ->badge()
-                    ->color(fn (int $state) => $state > 0 ? 'danger' : 'success')
-                    ->tooltip('Jumlah soal di exam ini yang belum ter-assign ke Bagian Ujian (section) manapun.'),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);

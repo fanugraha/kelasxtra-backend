@@ -2,14 +2,14 @@
 
 namespace App\Filament\Resources\ExamResource\RelationManagers;
 
+use App\Models\QuestionBank;
 use Filament\Actions\Action;
-use Filament\Actions\CreateAction;
-use Filament\Notifications\Notification;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
@@ -25,38 +25,19 @@ class SectionsRelationManager extends RelationManager
     public function form(Schema $schema): Schema
     {
         return $schema->components([
-            Select::make('category_id')
-                ->label('Kategori')
-                ->relationship('category', 'name')
-                ->required()
-                ->searchable()
-                ->preload(),
             TextInput::make('code')
                 ->label('Kode')
                 ->required()
-                ->maxLength(255)
-                ->helperText('Contoh: TWK, TIU, TKP'),
+                ->maxLength(255),
             TextInput::make('name')
                 ->label('Nama')
                 ->required()
-                ->maxLength(255)
-                ->helperText('Contoh: "Tes Wawasan Kebangsaan"'),
+                ->maxLength(255),
             TextInput::make('order')
                 ->label('Urutan')
                 ->numeric()
                 ->required()
                 ->default(1),
-            Select::make('scoring_type')
-                ->label('Tipe Penilaian')
-                ->options([
-                    'single_correct' => 'Single Correct (benar/salah)',
-                    'weighted_options' => 'Weighted Options (bobot per opsi)',
-                ])
-                ->required(),
-            TextInput::make('points_per_question')
-                ->label('Poin per Soal')
-                ->numeric()
-                ->required(),
             TextInput::make('min_passing_score')
                 ->label('Skor Minimal Lulus')
                 ->numeric()
@@ -86,57 +67,67 @@ class SectionsRelationManager extends RelationManager
                 TextColumn::make('code')->label('Kode'),
                 TextColumn::make('name')->label('Nama'),
                 TextColumn::make('category.name')->label('Kategori'),
+                TextColumn::make('questionBank.title')->label('Bank Soal'),
                 TextColumn::make('scoring_type')->badge(),
                 TextColumn::make('duration_minutes')->suffix(' menit'),
                 TextColumn::make('max_score')->label('Skor Maks'),
                 IconColumn::make('is_locked_after_next')->label('Terkunci')->boolean(),
             ])
             ->headerActions([
-                Action::make('generateFromProgram')
-                    ->label('Generate dari Program')
+                Action::make('attachBank')
+                    ->label('Attach Bank Soal')
                     ->color('success')
-                    ->requiresConfirmation()
-                    ->modalDescription('Membuat section untuk setiap kategori (TWK/TIU/TKP dst) di program exam ini, memakai passing_grade dari master data Kategori. Field "Skor Maksimal" & "Durasi" tetap perlu diisi manual sesudahnya sesuai jumlah soal.')
-                    ->action(function () {
+                    ->schema([
+                        Select::make('question_bank_id')
+                            ->label('Bank Soal')
+                            ->required()
+                            ->options(function () {
+                                $exam = $this->getOwnerRecord();
+
+                                return QuestionBank::where('program_id', $exam->program_id)
+                                    ->whereNotNull('category_id')
+                                    ->whereDoesntHave('examSections', fn ($q) => $q->where('exam_id', $exam->id))
+                                    ->with('category')
+                                    ->get()
+                                    ->mapWithKeys(fn (QuestionBank $bank) => [
+                                        $bank->id => $bank->title . ' (' . ($bank->category->name ?? '-') . ')',
+                                    ]);
+                            })
+                            ->searchable(),
+                        TextInput::make('max_score')
+                            ->label('Skor Maksimal Bagian Ini')
+                            ->numeric()
+                            ->required(),
+                        TextInput::make('duration_minutes')
+                            ->label('Durasi')
+                            ->numeric()
+                            ->required()
+                            ->suffix('menit'),
+                        TextInput::make('min_passing_score')
+                            ->label('Skor Minimal Lulus')
+                            ->numeric()
+                            ->helperText('Kosongkan kalau bagian ini tidak punya passing score sendiri.'),
+                    ])
+                    ->action(function (array $data) {
                         $exam = $this->getOwnerRecord();
-                        $bank = $exam->bank;
+                        $bank = QuestionBank::findOrFail($data['question_bank_id']);
 
-                        if (!$bank || !$bank->program) {
-                            Notification::make()->title('Bank soal exam ini tidak terhubung ke Program.')->danger()->send();
-                            return;
-                        }
-
-                        $existingCategoryIds = $exam->sections()->pluck('category_id')->all();
-                        $order = $exam->sections()->max('order') ?? 0;
-                        $created = 0;
-
-                        foreach ($bank->program->categories as $category) {
-                            if (in_array($category->id, $existingCategoryIds)) {
-                                continue;
-                            }
-                            $order++;
-                            $exam->sections()->create([
-                                'category_id' => $category->id,
-                                'code' => $category->code,
-                                'name' => $category->name,
-                                'order' => $order,
-                                'scoring_type' => 'single_correct',
-                                'points_per_question' => 1,
-                                'min_passing_score' => $category->passing_grade,
-                                'max_score' => 0,
-                                'duration_minutes' => 0,
+                        try {
+                            $section = $exam->attachBank($bank, [
+                                'order' => ($exam->sections()->max('order') ?? 0) + 1,
+                                'max_score' => $data['max_score'],
+                                'duration_minutes' => $data['duration_minutes'],
+                                'min_passing_score' => $data['min_passing_score'] ?? null,
                             ]);
-                            $created++;
-                        }
 
-                        Notification::make()
-                            ->title($created > 0
-                                ? "{$created} section dibuat dari kategori program. Lengkapi Skor Maksimal & Durasi tiap section, lalu assign ulang soal-soal yang exam_section_id-nya masih kosong."
-                                : 'Semua kategori program sudah punya section di exam ini.')
-                            ->success()
-                            ->send();
+                            Notification::make()
+                                ->title("Bank Soal \"{$bank->title}\" berhasil di-attach ke bagian \"{$section->name}\".")
+                                ->success()
+                                ->send();
+                        } catch (\InvalidArgumentException $e) {
+                            Notification::make()->title($e->getMessage())->danger()->send();
+                        }
                     }),
-                CreateAction::make(),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()]);
     }

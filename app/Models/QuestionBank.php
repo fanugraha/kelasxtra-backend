@@ -4,14 +4,17 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 class QuestionBank extends Model
 {
     use HasFactory;
     protected $fillable = [
         'subject_id',
         'program_id',
+        'category_id',
         'title',
+        'scoring_type',
+        'point_correct',
+        'point_wrong',
     ];
 
     protected static function booted(): void
@@ -19,6 +22,9 @@ class QuestionBank extends Model
         static::saving(function (self $bank) {
             if (blank($bank->program_id) && blank($bank->subject_id)) {
                 throw new \InvalidArgumentException('Question bank harus punya program_id atau subject_id.');
+            }
+            if (filled($bank->program_id) && blank($bank->category_id)) {
+                throw new \InvalidArgumentException('Question bank yang terikat Program harus punya category_id.');
             }
         });
     }
@@ -31,21 +37,20 @@ class QuestionBank extends Model
     {
         return $this->belongsTo(Program::class);
     }
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class);
+    }
     public function questions(): HasMany
     {
         return $this->hasMany(Question::class, 'bank_id');
     }
-    public function exams(): HasMany
+    public function examSections(): HasMany
     {
-        return $this->hasMany(Exam::class, 'bank_id');
-    }
-    public function sections(): HasMany
-    {
-        return $this->hasMany(QuestionBankSection::class);
+        return $this->hasMany(ExamSection::class, 'question_bank_id');
     }
     public function passages(): HasMany
     {
         return $this->hasMany(QuestionPassage::class);
     }
-
 }
