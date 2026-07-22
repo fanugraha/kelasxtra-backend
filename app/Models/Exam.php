@@ -91,9 +91,8 @@ class Exam extends Model
         $taxonomyName = $usesSubjectMode
             ? ($bank->subject->name ?? $bank->title)
             : ($bank->category->name ?? $bank->title);
-        $taxonomyColumn = $usesSubjectMode ? 'subject_id' : 'category_id';
 
-        $existing = $this->sections()->where($taxonomyColumn, $taxonomyId)->first();
+        $existing = $this->sections()->where('taxonomy_id', $taxonomyId)->first();
 
         if ($existing && $existing->question_bank_id !== $bank->id) {
             $label = $usesSubjectMode ? 'Mapel' : 'Kategori';
@@ -101,7 +100,6 @@ class Exam extends Model
         }
 
         $section = $existing ?? $this->sections()->create(array_merge([
-            $taxonomyColumn => $taxonomyId,
             'taxonomy_id' => $taxonomyId,
             'question_bank_id' => $bank->id,
             'code' => $usesSubjectMode
