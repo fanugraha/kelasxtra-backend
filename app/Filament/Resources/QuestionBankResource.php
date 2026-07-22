@@ -4,6 +4,8 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\QuestionBankResource\Pages;
 use App\Filament\Resources\QuestionBankResource\RelationManagers\QuestionsRelationManager;
+use App\Models\Category;
+use App\Models\Program;
 use App\Models\QuestionBank;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -33,25 +35,44 @@ class QuestionBankResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
+            // Bank Soal SEKARANG wajib punya Program (tidak ada lagi kasus
+            // latihan lepas tanpa Program) -- jadi field ini murni bergantung
+            // ke mode Program yang dipilih, tanpa cabang "Program kosong".
             Select::make('subject_id')
-                ->label('Mapel (opsional, untuk latihan soal harian tanpa Program)')
+                ->label('Mapel')
                 ->relationship('subject', 'name')
                 ->searchable()
-                ->preload(),
+                ->preload()
+                ->required(fn (Get $get) => Program::find($get('program_id'))?->usesSubjectMode() ?? false)
+                ->visible(fn (Get $get) => Program::find($get('program_id'))?->usesSubjectMode() ?? false)
+                ->helperText('Wajib diisi untuk Program bermode Mapel (mis. SNBT). Bank Soal ini HANYA akan berisi soal mapel ini.'),
             Select::make('program_id')
                 ->label('Program')
                 ->relationship('program', 'name')
+                ->required()
                 ->searchable()
                 ->preload()
                 ->live()
-                ->helperText('Isi kalau Bank Soal ini untuk Exam terstruktur (mis. SKD CPNS). Kalau diisi, Kategori di bawah wajib dipilih.'),
+                // Kategori/Mapel di bawah bergantung ke Program ini -- kalau
+                // Program diganti (termasuk gonta-ganti mode), field yang
+                // sudah kepilih di-reset supaya tidak ada kombinasi nyasar.
+                ->afterStateUpdated(function (Get $get, $set) {
+                    $set('category_id', null);
+                    $set('subject_id', null);
+                })
+                ->helperText('Menentukan apakah Bank Soal ini pakai Kategori (CPNS/BUMN) atau Mapel (Sekolah/Masuk Kuliah), sesuai pola Program ini.'),
+            // BARU: field Kategori sekarang muncul HANYA kalau Program yang
+            // dipilih pakai mode 'category' -- bukan lagi selalu tampil
+            // begitu Program diisi. Opsinya juga tetap difilter cuma yang
+            // program_id-nya sama dengan Program yang dipilih.
             Select::make('category_id')
                 ->label('Kategori')
-                ->relationship('category', 'name')
+                ->options(fn (Get $get) => Category::where('program_id', $get('program_id'))->pluck('name', 'id'))
                 ->searchable()
                 ->preload()
-                ->required(fn (Get $get) => filled($get('program_id')))
-                ->visible(fn (Get $get) => filled($get('program_id')))
+                ->live()
+                ->required(fn (Get $get) => filled($get('program_id')) && !Program::find($get('program_id'))?->usesSubjectMode())
+                ->visible(fn (Get $get) => filled($get('program_id')) && !Program::find($get('program_id'))?->usesSubjectMode())
                 ->helperText('Bank Soal ini HANYA akan berisi soal kategori ini (mis. TWK). Untuk kategori lain, buat Bank Soal terpisah.'),
             TextInput::make('title')->required()->maxLength(255),
             Select::make('scoring_type')
@@ -65,6 +86,7 @@ class QuestionBankResource extends Resource
             TextInput::make('point_correct')
                 ->label('Poin Jika Benar')
                 ->numeric()
+                ->minValue(0)
                 ->visible(fn (Get $get) => $get('scoring_type') === 'single_correct')
                 ->required(fn (Get $get) => $get('scoring_type') === 'single_correct'),
             TextInput::make('point_wrong')
@@ -81,9 +103,11 @@ class QuestionBankResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('title')->searchable()->sortable(),
-                TextColumn::make('subject.name')->label('Mapel'),
                 TextColumn::make('program.name')->label('Program'),
-                TextColumn::make('category.name')->label('Kategori'),
+                TextColumn::make('kelompok')
+                    ->label('Mapel / Kategori')
+                    ->getStateUsing(fn (QuestionBank $record) => $record->subject?->name ?? $record->category?->name)
+                    ->placeholder('—'),
                 TextColumn::make('scoring_type')->badge(),
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
             ])

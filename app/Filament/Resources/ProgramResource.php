@@ -5,11 +5,13 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ProgramResource\Pages;
 use App\Models\Program;
 use App\Filament\Resources\ProgramResource\RelationManagers\CategoriesRelationManager;
+use App\Filament\Resources\ProgramResource\RelationManagers\SubjectsRelationManager;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
@@ -48,6 +50,18 @@ class ProgramResource extends Resource
             TextInput::make('icon')
                 ->maxLength(255)
                 ->helperText('Nama icon (opsional), misalnya nama file atau class icon.'),
+            // BARU: menandai pola pengelompokan soal Program ini, supaya form
+            // Bank Soal bisa otomatis menampilkan field Kategori ATAU Mapel
+            // saja (bukan dua-duanya sekaligus) tergantung pilihan di sini.
+            Select::make('question_grouping_mode')
+                ->label('Pola Pengelompokan Soal')
+                ->options([
+                    'category' => 'Kategori (CPNS/BUMN/Kedinasan -- TWK/TIU/TKP, banyak bagian sekaligus per exam)',
+                    'subject' => 'Mapel (Sekolah/Masuk Kuliah -- Matematika/Fisika, latihan satu-satu)',
+                ])
+                ->required()
+                ->default('category')
+                ->helperText('Menentukan apakah Bank Soal di Program ini dikelompokkan pakai Kategori atau Mapel.'),
             Toggle::make('is_active')
                 ->default(true),
         ]);
@@ -60,6 +74,10 @@ class ProgramResource extends Resource
                 TextColumn::make('name')->searchable()->sortable(),
                 TextColumn::make('slug')->searchable(),
                 TextColumn::make('packages_count')->counts('packages')->label('Jumlah Paket'),
+                TextColumn::make('question_grouping_mode')
+                    ->label('Pola Soal')
+                    ->badge()
+                    ->formatStateUsing(fn (string $state) => $state === 'subject' ? 'Mapel' : 'Kategori'),
                 IconColumn::make('is_active')->boolean(),
                 TextColumn::make('created_at')->dateTime('d M Y')->sortable(),
             ])
@@ -78,6 +96,7 @@ class ProgramResource extends Resource
     {
         return [
             CategoriesRelationManager::class,
+            SubjectsRelationManager::class,
         ];
     }
 

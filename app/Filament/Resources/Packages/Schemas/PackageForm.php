@@ -12,6 +12,7 @@ use Filament\Schemas\Schema;
 use Filament\Forms\Components\FileUpload;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Exam;
+use App\Models\Program;
 
 class PackageForm
 {
@@ -54,12 +55,14 @@ class PackageForm
                     ->helperText('Aktifkan kalau paket ini jual latihan soal 1 kategori saja (mis. khusus TWK/TIU/TKP), bukan gabungan semua topik. Akan ditampilkan di section "Latihan Fokus" di Beranda, terpisah dari paket try out lengkap. Hanya tersedia untuk tipe paket "Latihan soal".')
                     ->default(false),
                 Select::make('category_id')
-                    ->label('Topik Fokus')
+                    ->label('Topik Fokus (Kategori)')
                     ->relationship('category', 'name')
                     ->searchable()
                     ->preload()
-                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic'))
-                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic'))
+                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
+                        && ! (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
+                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
+                        && ! (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
                     ->options(function (Get $get) {
                         $programId = $get('program_id');
 
@@ -68,6 +71,16 @@ class PackageForm
                             ->pluck('name', 'id');
                     })
                     ->helperText('Pilih kategori/topik yang jadi fokus paket ini (mis. TWK). Cuma nampilin kategori dari Program yang dipilih di atas.'),
+                Select::make('focus_subject_id')
+                    ->label('Topik Fokus (Mapel)')
+                    ->relationship('focusSubject', 'name')
+                    ->searchable()
+                    ->preload()
+                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
+                        && (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
+                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
+                        && (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
+                    ->helperText('Pilih mapel yang jadi fokus paket ini (mis. Matematika). Hanya relevan untuk Program bermode Mapel.'),
                 Select::make('exams')
                     ->label('Exam/Ujian yang Dijual')
                     ->relationship('exams', 'title')
@@ -82,17 +95,30 @@ class PackageForm
                         $subjectId = $get('subject_id');
                         $isFocusTopic = $get('is_focus_topic');
                         $categoryId = $get('category_id');
+                        $focusSubjectId = $get('focus_subject_id');
 
                         return Exam::query()
+                            ->with('sections.questionBank')
                             ->when($programId, fn ($q) => $q->where('program_id', $programId))
-                            // Paket Fokus 1 Topik: exam yang muncul HARUS exam 1-topik yang section-nya
-                            // cocok Topik Fokus -- jangan sampai admin bisa masukkan exam gabungan 3
-                            // materi ke paket yang katanya "fokus 1 topik".
+                            ->when($subjectId, fn ($q) => $q->whereHas('sections.questionBank', fn ($b) => $b->where('subject_id', $subjectId)))
+                            // Fokus 1 Topik (Kategori maupun Mapel): exam harus 1-topik yang
+                            // section-nya cocok Topik Fokus -- jangan sampai admin masukkan exam
+                            // gabungan. Kategori & Mapel kini sama-sama disimpan di taxonomy_id
+                            // pada exam_sections, jadi query-nya disatukan.
                             ->when($isFocusTopic && $categoryId, fn ($q) => $q
-                                ->whereHas('sections', fn ($s) => $s->where('category_id', $categoryId))
-                                ->whereDoesntHave('sections', fn ($s) => $s->where('category_id', '!=', $categoryId)->orWhereNull('category_id')))
+                                ->whereHas('sections', fn ($s) => $s->where('taxonomy_id', $categoryId))
+                                ->whereDoesntHave('sections', fn ($s) => $s->where('taxonomy_id', '!=', $categoryId)->orWhereNull('taxonomy_id')))
+                            ->when($isFocusTopic && $focusSubjectId, fn ($q) => $q
+                                ->whereHas('sections', fn ($s) => $s->where('taxonomy_id', $focusSubjectId))
+                                ->whereDoesntHave('sections', fn ($s) => $s->where('taxonomy_id', '!=', $focusSubjectId)->orWhereNull('taxonomy_id')))
                             ->get()
-                            ->mapWithKeys(fn ($exam) => [$exam->id => $exam->title]);
+                            ->mapWithKeys(fn ($exam) => [
+                                $exam->id => $exam->title . ' (' . $exam->sections
+                                    ->pluck('questionBank.title')
+                                    ->filter()
+                                    ->unique()
+                                    ->implode(', ') . ')',
+                            ]);
                     })
                     ->helperText(function (Get $get) {
                         $default = 'Pilih exam/ujian mana saja yang akan dibuka aksesnya untuk siswa yang membeli paket ini. Exam yang tidak dipilih di sini TIDAK akan bisa diakses meski satu bank soal.';
@@ -121,10 +147,14 @@ class PackageForm
                 TextInput::make('price')
                     ->required()
                     ->numeric()
+                    ->minValue(0)
                     ->prefix('Rp'),
                 TextInput::make('discount_price')
                     ->numeric()
-                    ->prefix('Rp'),
+                    ->minValue(0)
+                    ->lt('price')
+                    ->prefix('Rp')
+                    ->helperText('Harus lebih kecil dari Price kalau diisi.'),
                 Toggle::make('is_lifetime')
                     ->label('Akses Selamanya (Lifetime)')
                     ->live()

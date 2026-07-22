@@ -5,7 +5,7 @@ class ExamSection extends Model
 {
     protected $fillable = [
         'exam_id',
-        'category_id',
+        'taxonomy_id',
         'question_bank_id',
         'code',
         'name',
@@ -27,6 +27,10 @@ class ExamSection extends Model
     {
         return $this->belongsTo(Category::class);
     }
+    public function subject()
+    {
+        return $this->belongsTo(Subject::class);
+    }
     public function questionBank()
     {
         return $this->belongsTo(QuestionBank::class, 'question_bank_id');
@@ -39,5 +43,10 @@ class ExamSection extends Model
     public function attemptScores()
     {
         return $this->hasMany(ExamAttemptSectionScore::class);
+    }
+
+    public function getTaxonomyNameAttribute(): ?string
+    {
+        return $this->category->name ?? $this->subject->name ?? null;
     }
 }

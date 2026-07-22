@@ -14,12 +14,22 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class CategoriesRelationManager extends RelationManager
 {
     protected static string $relationship = 'categories';
 
     protected static ?string $title = 'Kategori Soal';
+
+    // Kategori Soal cuma relevan buat Program mode 'category' (CPNS/BUMN).
+    // Program mode 'subject' (Mapel) pakai Subject (dikelola terpisah di
+    // menu "Mata Pelajarans"), jadi tab ini disembunyikan supaya admin
+    // tidak bingung diminta isi Kategori padahal sudah pilih pola Mapel.
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return ! $ownerRecord->usesSubjectMode();
+    }
 
     public function form(Schema $schema): Schema
     {

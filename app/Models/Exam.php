@@ -72,24 +72,50 @@ class Exam extends Model
             throw new \InvalidArgumentException('Bank Soal harus berasal dari Program yang sama dengan Exam ini.');
         }
 
-        if (blank($bank->category_id)) {
-            throw new \InvalidArgumentException('Bank Soal ini belum punya kategori, tidak bisa di-attach ke Exam.');
+        // Satu jalur tunggal, ditentukan dari mode Program (bukan lagi
+        // dari cek kolom mana yang terisi di Bank Soal). taxonomy_id diisi
+        // di sini supaya query section ke depannya tidak perlu tahu lagi
+        // apakah dia category atau subject -- cukup baca taxonomy_id +
+        // program->usesSubjectMode() untuk interpretasinya.
+        $usesSubjectMode = $this->program->usesSubjectMode();
+
+        if ($usesSubjectMode && blank($bank->subject_id)) {
+            throw new \InvalidArgumentException('Program ini pakai mode Mapel, tapi Bank Soal ini belum punya Mapel.');
         }
 
-        $existing = $this->sections()->where('category_id', $bank->category_id)->first();
+        if (! $usesSubjectMode && blank($bank->category_id)) {
+            throw new \InvalidArgumentException('Program ini pakai mode Kategori, tapi Bank Soal ini belum punya Kategori.');
+        }
+
+        $taxonomyId = $usesSubjectMode ? $bank->subject_id : $bank->category_id;
+        $taxonomyName = $usesSubjectMode
+            ? ($bank->subject->name ?? $bank->title)
+            : ($bank->category->name ?? $bank->title);
+        $taxonomyColumn = $usesSubjectMode ? 'subject_id' : 'category_id';
+
+        $existing = $this->sections()->where($taxonomyColumn, $taxonomyId)->first();
 
         if ($existing && $existing->question_bank_id !== $bank->id) {
-            throw new \InvalidArgumentException('Kategori ini sudah diisi oleh Bank Soal lain di Exam ini.');
+            $label = $usesSubjectMode ? 'Mapel' : 'Kategori';
+            throw new \InvalidArgumentException("{$label} ini sudah diisi oleh Bank Soal lain di Exam ini.");
         }
 
         $section = $existing ?? $this->sections()->create(array_merge([
-            'category_id' => $bank->category_id,
+            $taxonomyColumn => $taxonomyId,
+            'taxonomy_id' => $taxonomyId,
             'question_bank_id' => $bank->id,
-            'code' => $bank->category->code ?? strtoupper(substr($bank->category->name ?? 'SEC', 0, 3)),
-            'name' => $bank->category->name ?? $bank->title,
+            'code' => $usesSubjectMode
+                ? strtoupper(substr($taxonomyName, 0, 3))
+                : ($bank->category->code ?? strtoupper(substr($taxonomyName, 0, 3))),
+            'name' => $taxonomyName,
             'scoring_type' => $bank->scoring_type,
         ], $sectionAttributes));
 
+        return $this->syncSectionQuestions($section, $bank);
+    }
+
+    protected function syncSectionQuestions(ExamSection $section, QuestionBank $bank): ExamSection
+    {
         foreach ($bank->questions()->pluck('id') as $questionId) {
             $this->questions()->syncWithoutDetaching([
                 $questionId => ['exam_section_id' => $section->id],
@@ -97,5 +123,18 @@ class Exam extends Model
         }
 
         return $section;
+    }
+
+    /**
+     * Kebalikan dari attachBank(): melepas semua soal dari section ini
+     * (hapus baris pivot exam_questions), lalu hapus section-nya sendiri.
+     * Section tanpa soal tidak berguna, jadi sekalian dibersihkan supaya
+     * admin tidak perlu 2 langkah manual (detach lalu hapus section).
+     */
+    public function detachSection(ExamSection $section): void
+    {
+        $this->questions()->wherePivot('exam_section_id', $section->id)->detach();
+
+        $section->delete();
     }
 }

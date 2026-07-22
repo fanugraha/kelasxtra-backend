@@ -32,8 +32,9 @@ class PackagesTable
                 IconColumn::make('is_focus_topic')
                     ->label('Fokus Topik')
                     ->boolean(),
-                TextColumn::make('category.name')
+                TextColumn::make('topik_fokus')
                     ->label('Topik')
+                    ->getStateUsing(fn ($record) => $record->category?->name ?? $record->focusSubject?->name)
                     ->placeholder('—'),
                 TextColumn::make('price')
                     ->money('IDR')
@@ -42,7 +43,10 @@ class PackagesTable
                     ->money('IDR')
                     ->sortable(),
                 TextColumn::make('duration_days')
-                    ->numeric()
+                    ->label('Durasi Akses')
+                    ->getStateUsing(fn ($record) => filled($record->duration_days)
+                        ? $record->duration_days . ' hari'
+                        : 'Lifetime')
                     ->sortable(),
                 TextColumn::make('created_at')
                     ->dateTime()

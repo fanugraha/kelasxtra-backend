@@ -9,6 +9,7 @@ use App\Filament\Resources\ExamResource\RelationManagers\SectionsRelationManager
 use App\Models\Exam;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
+use Filament\Notifications\Notification;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
@@ -16,6 +17,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\DB;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -48,10 +50,12 @@ class ExamResource extends Resource
                 ->maxLength(255),
             TextInput::make('duration_minutes')
                 ->numeric()
+                ->minValue(1)
                 ->required()
                 ->suffix('menit'),
             TextInput::make('passing_score')
                 ->numeric()
+                ->minValue(0)
                 ->helperText('Kosongkan kalau tidak ada passing score total. Dipakai HANYA kalau "Wajib lulus semua bagian" di bawah TIDAK diaktifkan.'),
             Toggle::make('require_all_sections_pass')
                 ->label('Wajib lulus semua bagian (section)')
@@ -86,7 +90,32 @@ class ExamResource extends Resource
                 TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
                 IconColumn::make('is_free_preview')->label('Free Preview')->boolean(),
             ])
-            ->recordActions([EditAction::make(), DeleteAction::make()])
+            ->recordActions([
+                EditAction::make(),
+                // BARU: cegah delete Exam kalau ada soal ter-attach lewat
+                // Bagian Ujian (exam_sections) di bawahnya. Tanpa ini, Laravel
+                // mencoba hapus exam_sections juga (cascade), lalu DB menolak
+                // mentah-mentah lewat foreign key constraint exam_questions
+                // (error 500) -- sekarang admin dapat pesan yang jelas.
+                DeleteAction::make()
+                    ->before(function (DeleteAction $action, Exam $record) {
+                        $sectionIds = $record->sections()->pluck('id');
+
+                        $questionCount = DB::table('exam_questions')
+                            ->whereIn('exam_section_id', $sectionIds)
+                            ->count();
+
+                        if ($questionCount > 0) {
+                            Notification::make()
+                                ->title('Tidak bisa menghapus Exam')
+                                ->body("Exam \"{$record->title}\" masih punya {$questionCount} soal ter-attach lewat Bagian Ujian-nya. Lepas soal-soal itu dari semua Bagian Ujian dulu sebelum menghapus Exam ini.")
+                                ->danger()
+                                ->send();
+
+                            $action->halt();
+                        }
+                    }),
+            ])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);
     }
 

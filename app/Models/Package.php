@@ -19,6 +19,7 @@ class Package extends Model
         'type',
         'is_focus_topic',
         'category_id',
+        'focus_subject_id',
         'price',
         'discount_price',
         'duration_days',
@@ -61,6 +62,11 @@ class Package extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function focusSubject(): BelongsTo
+    {
+        return $this->belongsTo(Subject::class, 'focus_subject_id');
     }
 
     public function classes(): HasMany

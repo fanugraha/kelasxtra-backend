@@ -23,8 +23,19 @@ class QuestionBank extends Model
             if (blank($bank->program_id) && blank($bank->subject_id)) {
                 throw new \InvalidArgumentException('Question bank harus punya program_id atau subject_id.');
             }
-            if (filled($bank->program_id) && blank($bank->category_id)) {
-                throw new \InvalidArgumentException('Question bank yang terikat Program harus punya category_id.');
+
+            if (filled($bank->program_id)) {
+                $program = $bank->program ?? \App\Models\Program::find($bank->program_id);
+
+                if ($program?->usesSubjectMode()) {
+                    if (blank($bank->subject_id)) {
+                        throw new \InvalidArgumentException('Question bank mode Mapel harus punya subject_id.');
+                    }
+                } else {
+                    if (blank($bank->category_id)) {
+                        throw new \InvalidArgumentException('Question bank yang terikat Program (mode Kategori) harus punya category_id.');
+                    }
+                }
             }
         });
     }
