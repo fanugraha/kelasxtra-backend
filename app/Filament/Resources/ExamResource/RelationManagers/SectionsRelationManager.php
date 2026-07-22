@@ -93,17 +93,17 @@ class SectionsRelationManager extends RelationManager
                             ->options(function () {
                                 $exam = $this->getOwnerRecord();
 
-                                // Bank Soal mode Kategori (category_id terisi) ATAU mode
-                                // Mapel (subject_id terisi) -- dulu cuma yang punya
-                                // category_id yang muncul, jadi Bank Soal Mapel selalu
-                                // hilang dari dropdown ini tanpa error apa pun.
+                                // Bank Soal sekarang cuma punya satu kolom taxonomy_id
+                                // (Kategori maupun Mapel disimpan di sana), jadi query
+                                // dan relasinya disatukan -- gak ada lagi cabang
+                                // category/subject terpisah seperti dulu.
                                 return QuestionBank::where('program_id', $exam->program_id)
-                                    ->where(fn ($q) => $q->whereNotNull('category_id')->orWhereNotNull('subject_id'))
+                                    ->whereNotNull('taxonomy_id')
                                     ->whereDoesntHave('examSections', fn ($q) => $q->where('exam_id', $exam->id))
-                                    ->with(['category', 'subject'])
+                                    ->with('taxonomy')
                                     ->get()
                                     ->mapWithKeys(fn (QuestionBank $bank) => [
-                                        $bank->id => $bank->title . ' (' . ($bank->category->name ?? $bank->subject->name ?? '-') . ')',
+                                        $bank->id => $bank->title . ' (' . ($bank->taxonomy->name ?? '-') . ')',
                                     ]);
                             })
                             ->searchable(),
