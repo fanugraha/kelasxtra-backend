@@ -14,12 +14,11 @@ class Package extends Model
 
     protected $fillable = [
         'program_id',
-        'subject_id',
+        'taxonomy_id',
         'name',
         'type',
         'is_focus_topic',
-        'category_id',
-        'focus_subject_id',
+        'focus_taxonomy_id',
         'price',
         'discount_price',
         'duration_days',
@@ -43,8 +42,8 @@ class Package extends Model
     protected static function booted(): void
     {
         static::saving(function (self $package) {
-            if (blank($package->program_id) && blank($package->subject_id)) {
-                throw new \InvalidArgumentException('Package harus punya program_id atau subject_id.');
+            if (blank($package->program_id) && blank($package->taxonomy_id)) {
+                throw new \InvalidArgumentException('Package harus punya program_id atau taxonomy_id.');
             }
         });
     }
@@ -54,19 +53,14 @@ class Package extends Model
         return $this->belongsTo(Program::class);
     }
 
-    public function subject(): BelongsTo
+    public function taxonomy(): BelongsTo
     {
-        return $this->belongsTo(Subject::class);
+        return $this->belongsTo(Taxonomy::class);
     }
 
-    public function category(): BelongsTo
+    public function focusTaxonomy(): BelongsTo
     {
-        return $this->belongsTo(Category::class);
-    }
-
-    public function focusSubject(): BelongsTo
-    {
-        return $this->belongsTo(Subject::class, 'focus_subject_id');
+        return $this->belongsTo(Taxonomy::class, 'focus_taxonomy_id');
     }
 
     public function classes(): HasMany

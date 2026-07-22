@@ -8,9 +8,8 @@ class QuestionBank extends Model
 {
     use HasFactory;
     protected $fillable = [
-        'subject_id',
+        'taxonomy_id',
         'program_id',
-        'category_id',
         'title',
         'scoring_type',
         'point_correct',
@@ -20,37 +19,23 @@ class QuestionBank extends Model
     protected static function booted(): void
     {
         static::saving(function (self $bank) {
-            if (blank($bank->program_id) && blank($bank->subject_id)) {
-                throw new \InvalidArgumentException('Question bank harus punya program_id atau subject_id.');
+            if (blank($bank->program_id) && blank($bank->taxonomy_id)) {
+                throw new \InvalidArgumentException('Question bank harus punya program_id atau taxonomy_id.');
             }
 
-            if (filled($bank->program_id)) {
-                $program = $bank->program ?? \App\Models\Program::find($bank->program_id);
-
-                if ($program?->usesSubjectMode()) {
-                    if (blank($bank->subject_id)) {
-                        throw new \InvalidArgumentException('Question bank mode Mapel harus punya subject_id.');
-                    }
-                } else {
-                    if (blank($bank->category_id)) {
-                        throw new \InvalidArgumentException('Question bank yang terikat Program (mode Kategori) harus punya category_id.');
-                    }
-                }
+            if (filled($bank->program_id) && blank($bank->taxonomy_id)) {
+                throw new \InvalidArgumentException('Question bank yang terikat Program harus punya taxonomy_id.');
             }
         });
     }
 
-    public function subject(): BelongsTo
+    public function taxonomy(): BelongsTo
     {
-        return $this->belongsTo(Subject::class);
+        return $this->belongsTo(Taxonomy::class);
     }
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
-    }
-    public function category(): BelongsTo
-    {
-        return $this->belongsTo(Category::class);
     }
     public function questions(): HasMany
     {

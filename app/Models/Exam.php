@@ -72,68 +72,29 @@ class Exam extends Model
             throw new \InvalidArgumentException('Bank Soal harus berasal dari Program yang sama dengan Exam ini.');
         }
 
-        // Satu jalur tunggal, ditentukan dari mode Program (bukan lagi
-        // dari cek kolom mana yang terisi di Bank Soal). taxonomy_id diisi
-        // di sini supaya query section ke depannya tidak perlu tahu lagi
-        // apakah dia category atau subject -- cukup baca taxonomy_id +
-        // program->usesSubjectMode() untuk interpretasinya.
-        $usesSubjectMode = $this->program->usesSubjectMode();
-
-        if ($usesSubjectMode && blank($bank->subject_id)) {
-            throw new \InvalidArgumentException('Program ini pakai mode Mapel, tapi Bank Soal ini belum punya Mapel.');
+        if (blank($bank->taxonomy_id)) {
+            throw new \InvalidArgumentException('Bank Soal ini belum punya Taxonomy.');
         }
 
-        if (! $usesSubjectMode && blank($bank->category_id)) {
-            throw new \InvalidArgumentException('Program ini pakai mode Kategori, tapi Bank Soal ini belum punya Kategori.');
-        }
-
-        $taxonomy = $this->resolveTaxonomy($usesSubjectMode, $bank);
-        $taxonomyId = $taxonomy->id;
+        $taxonomy = $bank->taxonomy;
+        $taxonomyId = $bank->taxonomy_id;
         $taxonomyName = $taxonomy->name ?? $bank->title;
 
         $existing = $this->sections()->where('taxonomy_id', $taxonomyId)->first();
 
         if ($existing && $existing->question_bank_id !== $bank->id) {
-            $label = $usesSubjectMode ? 'Mapel' : 'Kategori';
-            throw new \InvalidArgumentException("{$label} ini sudah diisi oleh Bank Soal lain di Exam ini.");
+            throw new \InvalidArgumentException('Taxonomy ini sudah diisi oleh Bank Soal lain di Exam ini.');
         }
 
         $section = $existing ?? $this->sections()->create(array_merge([
             'taxonomy_id' => $taxonomyId,
             'question_bank_id' => $bank->id,
-            'code' => $usesSubjectMode
-                ? strtoupper(substr($taxonomyName, 0, 3))
-                : ($bank->category->code ?? strtoupper(substr($taxonomyName, 0, 3))),
+            'code' => $taxonomy->code ?? strtoupper(substr($taxonomyName, 0, 3)),
             'name' => $taxonomyName,
             'scoring_type' => $bank->scoring_type,
         ], $sectionAttributes));
 
         return $this->syncSectionQuestions($section, $bank);
-    }
-
-    /**
-     * Menerjemahkan subject_id/category_id LAMA di Bank Soal ke id
-     * baru di tabel taxonomies (hasil unifikasi categories+subjects).
-     */
-    protected function resolveTaxonomy(bool $usesSubjectMode, QuestionBank $bank): Taxonomy
-    {
-        $taxonomy = $usesSubjectMode
-            ? Taxonomy::subjects()
-                ->where('legacy_subject_id', $bank->subject_id)
-                ->first()
-            : Taxonomy::categories()
-                ->where('program_id', $this->program_id)
-                ->where('legacy_category_id', $bank->category_id)
-                ->first();
-
-        if (! $taxonomy) {
-            throw new \RuntimeException(
-                "Taxonomy tidak ditemukan untuk bank #{$bank->id} (mode: " .
-                ($usesSubjectMode ? 'subject' : 'category') . ")."
-            );
-        }
-
-        return $taxonomy;
     }
 
     protected function syncSectionQuestions(ExamSection $section, QuestionBank $bank): ExamSection
