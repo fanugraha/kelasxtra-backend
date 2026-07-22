@@ -39,9 +39,12 @@ class Program extends Model
     {
         return $this->hasMany(QuestionBank::class);
     }
+
+    // Kategori Soal sekarang disimpan di tabel taxonomies (type='category'),
+    // masih terikat ke Program ini lewat taxonomies.program_id.
     public function categories(): HasMany
     {
-        return $this->hasMany(Category::class);
+        return $this->hasMany(Taxonomy::class)->categories();
     }
 
     public function brand(): BelongsTo
@@ -49,14 +52,15 @@ class Program extends Model
         return $this->belongsTo(Brand::class);
     }
 
-    // Subject bersifat global (tidak punya program_id sendiri). Relasinya ke
-    // Program ini cuma tidak langsung, lewat question_banks yang menyimpan
-    // program_id + subject_id sekaligus. Dipakai buat SubjectsRelationManager
-    // (read-only) supaya admin bisa lihat Mapel apa saja yang sudah dipakai
-    // di Program mode 'subject' ini.
+    // Mapel bersifat global (taxonomies.program_id kosong untuk type='subject').
+    // Relasinya ke Program ini tidak langsung, lewat question_banks yang
+    // menyimpan program_id + taxonomy_id sekaligus. Dipakai buat
+    // SubjectsRelationManager (read-only) supaya admin bisa lihat Mapel apa
+    // saja yang sudah dipakai di Program mode 'subject' ini.
     public function subjects(): BelongsToMany
     {
-        return $this->belongsToMany(Subject::class, 'question_banks', 'program_id', 'subject_id')
+        return $this->belongsToMany(Taxonomy::class, 'question_banks', 'program_id', 'taxonomy_id')
+            ->where('taxonomies.type', 'subject')
             ->distinct();
     }
 }

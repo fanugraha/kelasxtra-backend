@@ -13,6 +13,7 @@ use Filament\Forms\Components\FileUpload;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Exam;
 use App\Models\Program;
+use App\Models\Taxonomy;
 
 class PackageForm
 {
@@ -23,19 +24,24 @@ class PackageForm
                 Select::make('program_id')
                     ->label('Program')
                     ->relationship('program', 'name')
+                    ->required()
                     ->searchable()
                     ->preload()
-                    ->requiredWithout('subject_id')
                     ->live()
-                    ->helperText('Isi ini kalau paket terikat ke program tryout (CPNS, TOEFL, dll).'),
-                Select::make('subject_id')
+                    ->afterStateUpdated(function (Get $get, $set) {
+                        $set('taxonomy_id', null);
+                        $set('focus_taxonomy_id', null);
+                    })
+                    ->helperText('Program yang paket ini terikat (CPNS, TOEFL, dll). Wajib diisi.'),
+                // Mata Pelajaran umum untuk paket. Cuma relevan buat Program
+                // mode Mapel (mis. paket bimbel per-mapel Matematika, Fisika).
+                Select::make('taxonomy_id')
                     ->label('Mata Pelajaran')
-                    ->relationship('subject', 'name')
+                    ->options(fn (Get $get) => Taxonomy::subjects()->pluck('name', 'id'))
                     ->searchable()
                     ->preload()
-                    ->requiredWithout('program_id')
-                    ->live()
-                    ->helperText('Isi ini kalau paket berupa latihan/bimbel per-mapel (Matematika, Fisika, dll).'),
+                    ->visible(fn (Get $get) => Program::find($get('program_id'))?->usesSubjectMode() ?? false)
+                    ->helperText('Isi kalau paket ini fokus ke satu Mapel tertentu (mis. Matematika, Fisika).'),
                 TextInput::make('name')
                     ->required(),
                 Select::make('type')
@@ -52,35 +58,31 @@ class PackageForm
                     ->live()
                     ->visible(fn (Get $get) => $get('type') === 'latihan_soal')
                     ->dehydrateStateUsing(fn (Get $get, $state) => $get('type') === 'latihan_soal' ? $state : false)
-                    ->helperText('Aktifkan kalau paket ini jual latihan soal 1 kategori saja (mis. khusus TWK/TIU/TKP), bukan gabungan semua topik. Akan ditampilkan di section "Latihan Fokus" di Beranda, terpisah dari paket try out lengkap. Hanya tersedia untuk tipe paket "Latihan soal".')
+                    ->helperText('Aktifkan kalau paket ini jual latihan soal 1 topik saja (mis. khusus TWK, atau khusus Matematika), bukan gabungan semua topik. Paket seperti ini akan dikelompokkan terpisah (section "Latihan Fokus") di halaman depan, beda dari paket try out lengkap yang jual semua topik sekaligus. Hanya tersedia untuk tipe paket "Latihan soal".')
                     ->default(false),
-                Select::make('category_id')
-                    ->label('Topik Fokus (Kategori)')
-                    ->relationship('category', 'name')
+                // Topik Fokus: satu dropdown ini menentukan pengelompokan paket
+                // di halaman depan untuk paket "Latihan Fokus" (is_focus_topic).
+                // Isinya Kategori (kalau Program mode Kategori, mis. TWK) atau
+                // Mapel (kalau Program mode Mapel, mis. Matematika).
+                Select::make('focus_taxonomy_id')
+                    ->label(fn (Get $get) => Program::find($get('program_id'))?->usesSubjectMode()
+                        ? 'Topik Fokus (Mapel)'
+                        : 'Topik Fokus (Kategori)')
                     ->searchable()
                     ->preload()
-                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
-                        && ! (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
-                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
-                        && ! (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
+                    ->live()
+                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic'))
+                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic'))
                     ->options(function (Get $get) {
-                        $programId = $get('program_id');
-
-                        return \App\Models\Category::query()
-                            ->when($programId, fn ($q) => $q->where('program_id', $programId))
-                            ->pluck('name', 'id');
+                        $program = Program::find($get('program_id'));
+                        if (! $program) {
+                            return [];
+                        }
+                        return $program->usesSubjectMode()
+                            ? Taxonomy::subjects()->pluck('name', 'id')
+                            : Taxonomy::categories()->where('program_id', $program->id)->pluck('name', 'id');
                     })
-                    ->helperText('Pilih kategori/topik yang jadi fokus paket ini (mis. TWK). Cuma nampilin kategori dari Program yang dipilih di atas.'),
-                Select::make('focus_subject_id')
-                    ->label('Topik Fokus (Mapel)')
-                    ->relationship('focusSubject', 'name')
-                    ->searchable()
-                    ->preload()
-                    ->visible(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
-                        && (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
-                    ->required(fn (Get $get) => $get('type') === 'latihan_soal' && $get('is_focus_topic')
-                        && (Program::find($get('program_id'))?->usesSubjectMode() ?? false))
-                    ->helperText('Pilih mapel yang jadi fokus paket ini (mis. Matematika). Hanya relevan untuk Program bermode Mapel.'),
+                    ->helperText('Pilih topik yang jadi fokus paket ini. Menentukan pengelompokan paket ini di halaman depan (mis. dikelompokkan sebagai "Latihan TWK" atau "Latihan Matematika"). Hanya nampilin topik dari Program yang dipilih di atas.'),
                 Select::make('exams')
                     ->label('Exam/Ujian yang Dijual')
                     ->relationship('exams', 'title')
@@ -92,25 +94,20 @@ class PackageForm
                     ->required(fn (Get $get) => $get('type') === 'latihan_soal')
                     ->options(function (Get $get) {
                         $programId = $get('program_id');
-                        $subjectId = $get('subject_id');
+                        $taxonomyId = $get('taxonomy_id');
                         $isFocusTopic = $get('is_focus_topic');
-                        $categoryId = $get('category_id');
-                        $focusSubjectId = $get('focus_subject_id');
+                        $focusTaxonomyId = $get('focus_taxonomy_id');
 
                         return Exam::query()
                             ->with('sections.questionBank')
                             ->when($programId, fn ($q) => $q->where('program_id', $programId))
-                            ->when($subjectId, fn ($q) => $q->whereHas('sections.questionBank', fn ($b) => $b->where('subject_id', $subjectId)))
-                            // Fokus 1 Topik (Kategori maupun Mapel): exam harus 1-topik yang
-                            // section-nya cocok Topik Fokus -- jangan sampai admin masukkan exam
-                            // gabungan. Kategori & Mapel kini sama-sama disimpan di taxonomy_id
-                            // pada exam_sections, jadi query-nya disatukan.
-                            ->when($isFocusTopic && $categoryId, fn ($q) => $q
-                                ->whereHas('sections', fn ($s) => $s->where('taxonomy_id', $categoryId))
-                                ->whereDoesntHave('sections', fn ($s) => $s->where('taxonomy_id', '!=', $categoryId)->orWhereNull('taxonomy_id')))
-                            ->when($isFocusTopic && $focusSubjectId, fn ($q) => $q
-                                ->whereHas('sections', fn ($s) => $s->where('taxonomy_id', $focusSubjectId))
-                                ->whereDoesntHave('sections', fn ($s) => $s->where('taxonomy_id', '!=', $focusSubjectId)->orWhereNull('taxonomy_id')))
+                            ->when($taxonomyId, fn ($q) => $q->whereHas('sections.questionBank', fn ($b) => $b->where('taxonomy_id', $taxonomyId)))
+                            // Fokus 1 Topik: exam harus 1-topik yang section-nya
+                            // cocok Topik Fokus -- jangan sampai admin masukkan
+                            // exam gabungan.
+                            ->when($isFocusTopic && $focusTaxonomyId, fn ($q) => $q
+                                ->whereHas('sections', fn ($s) => $s->where('taxonomy_id', $focusTaxonomyId))
+                                ->whereDoesntHave('sections', fn ($s) => $s->where('taxonomy_id', '!=', $focusTaxonomyId)->orWhereNull('taxonomy_id')))
                             ->get()
                             ->mapWithKeys(fn ($exam) => [
                                 $exam->id => $exam->title . ' (' . $exam->sections

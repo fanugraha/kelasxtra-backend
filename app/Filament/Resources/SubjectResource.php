@@ -3,7 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\SubjectResource\Pages;
-use App\Models\Subject;
+use App\Models\Taxonomy;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -14,10 +14,11 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class SubjectResource extends Resource
 {
-    protected static ?string $model = Subject::class;
+    protected static ?string $model = Taxonomy::class;
 
     protected static ?string $modelLabel = 'Mata Pelajaran';
 
@@ -26,6 +27,13 @@ class SubjectResource extends Resource
     protected static string|\UnitEnum|null $navigationGroup = 'Bank Soal & Ujian';
 
     protected static ?int $navigationSort = 1;
+
+    // Menu ini cuma boleh nampilin & bikin Taxonomy tipe 'subject' (Mapel).
+    // Taxonomy tipe 'category' dikelola lewat tab Kategori di halaman Program.
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->subjects();
+    }
 
     public static function form(Schema $schema): Schema
     {

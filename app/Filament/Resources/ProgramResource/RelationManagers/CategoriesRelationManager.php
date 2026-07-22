@@ -23,9 +23,9 @@ class CategoriesRelationManager extends RelationManager
     protected static ?string $title = 'Kategori Soal';
 
     // Kategori Soal cuma relevan buat Program mode 'category' (CPNS/BUMN).
-    // Program mode 'subject' (Mapel) pakai Subject (dikelola terpisah di
-    // menu "Mata Pelajarans"), jadi tab ini disembunyikan supaya admin
-    // tidak bingung diminta isi Kategori padahal sudah pilih pola Mapel.
+    // Program mode 'subject' (Mapel) pakai Taxonomy tipe 'subject' (dikelola
+    // terpisah di menu "Mata Pelajaran"), jadi tab ini disembunyikan supaya
+    // admin tidak bingung diminta isi Kategori padahal sudah pilih pola Mapel.
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
     {
         return ! $ownerRecord->usesSubjectMode();
@@ -66,7 +66,16 @@ class CategoriesRelationManager extends RelationManager
                 IconColumn::make('requires_passage')->boolean()->label('Butuh Bacaan'),
             ])
             ->headerActions([
-                CreateAction::make(),
+                // Tab ini cuma pernah nampilin Taxonomy tipe 'category' (lihat
+                // Program::categories() yang sudah discope), tapi relasi
+                // hasMany biasa TIDAK otomatis isi kolom 'type' waktu bikin
+                // record baru -- makanya kita set manual di sini.
+                CreateAction::make()
+                    ->mutateFormDataUsing(function (array $data): array {
+                        $data['type'] = 'category';
+
+                        return $data;
+                    }),
             ])
             ->recordActions([
                 EditAction::make(),
