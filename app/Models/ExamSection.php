@@ -23,13 +23,9 @@ class ExamSection extends Model
     {
         return $this->belongsTo(Exam::class);
     }
-    public function category()
+    public function taxonomy(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
-        return $this->belongsTo(Category::class);
-    }
-    public function subject()
-    {
-        return $this->belongsTo(Subject::class);
+        return $this->belongsTo(\App\Models\Taxonomy::class);
     }
     public function questionBank()
     {
@@ -47,6 +43,6 @@ class ExamSection extends Model
 
     public function getTaxonomyNameAttribute(): ?string
     {
-        return $this->category->name ?? $this->subject->name ?? null;
+        return $this->taxonomy?->name;
     }
 }

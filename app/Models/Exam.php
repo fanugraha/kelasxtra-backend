@@ -87,10 +87,9 @@ class Exam extends Model
             throw new \InvalidArgumentException('Program ini pakai mode Kategori, tapi Bank Soal ini belum punya Kategori.');
         }
 
-        $taxonomyId = $usesSubjectMode ? $bank->subject_id : $bank->category_id;
-        $taxonomyName = $usesSubjectMode
-            ? ($bank->subject->name ?? $bank->title)
-            : ($bank->category->name ?? $bank->title);
+        $taxonomy = $this->resolveTaxonomy($usesSubjectMode, $bank);
+        $taxonomyId = $taxonomy->id;
+        $taxonomyName = $taxonomy->name ?? $bank->title;
 
         $existing = $this->sections()->where('taxonomy_id', $taxonomyId)->first();
 
@@ -110,6 +109,31 @@ class Exam extends Model
         ], $sectionAttributes));
 
         return $this->syncSectionQuestions($section, $bank);
+    }
+
+    /**
+     * Menerjemahkan subject_id/category_id LAMA di Bank Soal ke id
+     * baru di tabel taxonomies (hasil unifikasi categories+subjects).
+     */
+    protected function resolveTaxonomy(bool $usesSubjectMode, QuestionBank $bank): Taxonomy
+    {
+        $taxonomy = $usesSubjectMode
+            ? Taxonomy::subjects()
+                ->where('legacy_subject_id', $bank->subject_id)
+                ->first()
+            : Taxonomy::categories()
+                ->where('program_id', $this->program_id)
+                ->where('legacy_category_id', $bank->category_id)
+                ->first();
+
+        if (! $taxonomy) {
+            throw new \RuntimeException(
+                "Taxonomy tidak ditemukan untuk bank #{$bank->id} (mode: " .
+                ($usesSubjectMode ? 'subject' : 'category') . ")."
+            );
+        }
+
+        return $taxonomy;
     }
 
     protected function syncSectionQuestions(ExamSection $section, QuestionBank $bank): ExamSection
