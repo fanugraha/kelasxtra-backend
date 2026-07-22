@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Taxonomy extends Model
 {
@@ -25,6 +26,13 @@ class Taxonomy extends Model
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
+    }
+
+    // Ditambahkan: dipakai SubjectResource buat hitung "Jumlah Bank Soal"
+    // per Mapel (->counts('questionBanks')), dan juga relevan buat Kategori.
+    public function questionBanks(): HasMany
+    {
+        return $this->hasMany(QuestionBank::class);
     }
 
     public function scopeCategories(Builder $query): Builder
