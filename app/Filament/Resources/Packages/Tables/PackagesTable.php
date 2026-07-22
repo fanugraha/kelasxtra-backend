@@ -7,8 +7,8 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ReplicateAction;
 use Filament\Actions\ViewAction;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 class PackagesTable
@@ -21,21 +21,31 @@ class PackagesTable
                     ->label('Program')
                     ->placeholder('—')
                     ->searchable(),
-                TextColumn::make('subject.name')
+                // SEDERHANA: daripada strip kosong yang ambigu, tulis alasan
+                // kosongnya langsung. Admin gak perlu nebak "kosong karena
+                // belum diisi" atau "kosong karena memang gak relevan".
+                TextColumn::make('taxonomy.name')
                     ->label('Mapel')
-                    ->placeholder('—')
+                    ->getStateUsing(fn ($record) => $record->taxonomy?->name
+                        ?? ($record->program?->usesSubjectMode() ? 'Belum dipilih' : 'Tidak berlaku'))
+                    ->color(fn ($record) => $record->taxonomy_id ? null : 'gray')
                     ->searchable(),
                 TextColumn::make('name')
                     ->searchable(),
                 TextColumn::make('type')
                     ->badge(),
-                IconColumn::make('is_focus_topic')
-                    ->label('Fokus Topik')
-                    ->boolean(),
+                // SEDERHANA: toggle "Fokus Topik" + kolom "Topik" digabung
+                // jadi 1 kolom saja, karena keduanya memang satu konsep
+                // (boolean yang menentukan ada-tidaknya sebuah value).
+                // Hasilnya langsung "Semua Topik" (default/reguler) atau
+                // nama topiknya -- admin baca 1 kolom, bukan 2.
                 TextColumn::make('topik_fokus')
                     ->label('Topik')
-                    ->getStateUsing(fn ($record) => $record->category?->name ?? $record->focusSubject?->name)
-                    ->placeholder('—'),
+                    ->badge()
+                    ->getStateUsing(fn ($record) => $record->is_focus_topic
+                        ? ($record->focusTaxonomy?->name ?? 'Belum dipilih')
+                        : 'Semua Topik')
+                    ->color(fn ($record) => $record->is_focus_topic ? 'warning' : 'gray'),
                 TextColumn::make('price')
                     ->money('IDR')
                     ->sortable(),
@@ -58,7 +68,12 @@ class PackagesTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                SelectFilter::make('is_focus_topic')
+                    ->label('Topik')
+                    ->options([
+                        '1' => 'Fokus 1 Topik',
+                        '0' => 'Semua Topik',
+                    ]),
             ])
             ->recordActions([
                 ViewAction::make(),

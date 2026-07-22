@@ -14,7 +14,9 @@ class PackageInfolist
                 TextEntry::make('program.name')
                     ->label('Program')
                     ->placeholder('-'),
-                TextEntry::make('subject.name')
+                // Dulu 'subject.name' (relasi lama) -- sekarang ambil dari
+                // taxonomy_id.
+                TextEntry::make('taxonomy.name')
                     ->label('Mata Pelajaran')
                     ->placeholder('-'),
                 TextEntry::make('name'),

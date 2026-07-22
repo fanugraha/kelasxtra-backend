@@ -20,6 +20,8 @@ class Exam extends Model
         'require_all_sections_pass',
         'is_free_preview',
         'uses_section_timers',
+        'focus_mode',
+        'focus_taxonomy_id',
     ];
 
     protected function casts(): array
@@ -34,6 +36,16 @@ class Exam extends Model
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
+    }
+
+    public function focusTaxonomy(): BelongsTo
+    {
+        return $this->belongsTo(Taxonomy::class, 'focus_taxonomy_id');
+    }
+
+    public function isFocusTopic(): bool
+    {
+        return $this->focus_mode === 'focus_topic';
     }
 
     public function sections(): HasMany

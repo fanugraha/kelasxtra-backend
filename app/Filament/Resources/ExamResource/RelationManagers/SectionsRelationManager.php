@@ -93,12 +93,16 @@ class SectionsRelationManager extends RelationManager
                             ->options(function () {
                                 $exam = $this->getOwnerRecord();
 
-                                // Bank Soal sekarang cuma punya satu kolom taxonomy_id
-                                // (Kategori maupun Mapel disimpan di sana), jadi query
-                                // dan relasinya disatukan -- gak ada lagi cabang
-                                // category/subject terpisah seperti dulu.
+                                // Fokus Exam (focus_mode/focus_taxonomy_id) sekarang
+                                // jadi sumber kebenaran: kalau Exam di-set "Fokus 1
+                                // Topik", Bank Soal yang boleh dipilih otomatis
+                                // kefilter cuma yang taxonomy_id-nya cocok.
                                 return QuestionBank::where('program_id', $exam->program_id)
                                     ->whereNotNull('taxonomy_id')
+                                    ->when(
+                                        $exam->focus_mode === 'focus_topic' && $exam->focus_taxonomy_id,
+                                        fn ($q) => $q->where('taxonomy_id', $exam->focus_taxonomy_id)
+                                    )
                                     ->whereDoesntHave('examSections', fn ($q) => $q->where('exam_id', $exam->id))
                                     ->with('taxonomy')
                                     ->get()

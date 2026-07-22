@@ -7,6 +7,8 @@ use App\Filament\Resources\ExamResource\RelationManagers\BatchesRelationManager;
 use App\Filament\Resources\ExamResource\RelationManagers\QuestionsRelationManager;
 use App\Filament\Resources\ExamResource\RelationManagers\SectionsRelationManager;
 use App\Models\Exam;
+use App\Models\Program;
+use App\Models\Taxonomy;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
@@ -16,11 +18,13 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\DB;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 class ExamResource extends Resource
@@ -41,13 +45,52 @@ class ExamResource extends Resource
             Select::make('program_id')
                 ->label('Program')
                 ->required()
-                ->options(fn () => \App\Models\Program::pluck('name', 'id'))
+                ->options(fn () => Program::pluck('name', 'id'))
                 ->searchable()
                 ->preload()
+                ->live()
+                ->afterStateUpdated(fn ($set) => $set('focus_taxonomy_id', null))
                 ->helperText('Exam ini akan berisi soal dari Bank Soal milik Program ini. Setelah Exam dibuat, tambahkan Bank Soal per kategori lewat tab "Bagian Ujian" -> "Attach Bank Soal".'),
             TextInput::make('title')
                 ->required()
                 ->maxLength(255),
+            // Fokus Exam: sumber kebenaran sekarang di sini, bukan lagi
+            // dihitung dari taxonomy_id section-section yang ter-attach.
+            // Ini yang dipakai buat filter pilihan "Attach Bank Soal" di
+            // bawah, dan nantinya juga dipakai PackageForm buat filter Exam.
+            Select::make('focus_mode')
+                ->label('Tipe Exam')
+                ->options([
+                    'all_program' => 'All Program',
+                    'focus_topic' => 'Fokus 1 Topik',
+                ])
+                ->required()
+                ->live()
+                ->default('all_program')
+                ->afterStateUpdated(fn ($set) => $set('focus_taxonomy_id', null))
+                ->helperText('"All Program" -> bisa attach Bank Soal kategori/mapel apa saja dari Program ini. "Fokus 1 Topik" -> Exam ini cuma untuk 1 kategori/mapel tertentu (mis. khusus TIU), pilihan Bank Soal di bawah otomatis kefilter.'),
+            Select::make('focus_taxonomy_id')
+                ->label(fn (Get $get) => Program::find($get('program_id'))?->usesSubjectMode()
+                    ? 'Topik Fokus (Mapel)'
+                    : 'Topik Fokus (Kategori)')
+                ->options(function (Get $get) {
+                    $program = Program::find($get('program_id'));
+
+                    if (! $program) {
+                        return [];
+                    }
+
+                    return $program->usesSubjectMode()
+                        ? Taxonomy::subjects()->pluck('name', 'id')
+                        : Taxonomy::categories()->where('program_id', $program->id)->pluck('name', 'id');
+                })
+                ->searchable()
+                ->preload()
+                ->live()
+                ->visible(fn (Get $get) => $get('focus_mode') === 'focus_topic')
+                ->required(fn (Get $get) => $get('focus_mode') === 'focus_topic')
+                ->dehydrateStateUsing(fn (Get $get, $state) => $get('focus_mode') === 'focus_topic' ? $state : null)
+                ->helperText('Cuma nampilin kategori/mapel dari Program yang dipilih di atas.'),
             TextInput::make('duration_minutes')
                 ->numeric()
                 ->minValue(1)
@@ -75,8 +118,23 @@ class ExamResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('title')->searchable()->sortable(),
-                TextColumn::make('program.name')->label('Program'),
+                TextColumn::make('title')
+                    ->searchable()
+                    ->sortable()
+                    ->weight('bold'),
+                TextColumn::make('program.name')
+                    ->label('Program')
+                    ->badge()
+                    ->color('gray'),
+                // Sekarang dibaca langsung dari kolom focus_mode /
+                // relasi focusTaxonomy -- bukan lagi dihitung dari section.
+                TextColumn::make('focus_status')
+                    ->label('Fokus')
+                    ->state(fn (Exam $record) => $record->focus_mode === 'focus_topic'
+                        ? 'Fokus: ' . ($record->focusTaxonomy?->name ?? '-')
+                        : 'All Program')
+                    ->badge()
+                    ->color(fn (Exam $record) => $record->focus_mode === 'focus_topic' ? 'warning' : 'success'),
                 TextColumn::make('bank_soal')
                     ->label('Bank Soal Terpasang')
                     ->getStateUsing(fn (Exam $record) => $record->sections()
@@ -84,19 +142,37 @@ class ExamResource extends Resource
                         ->get()
                         ->pluck('questionBank.title')
                         ->filter()
-                        ->implode(', '))
+                        ->values()
+                        ->all())
+                    ->badge()
+                    ->color('gray')
                     ->wrap(),
-                TextColumn::make('duration_minutes')->suffix(' menit'),
-                TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
-                IconColumn::make('is_free_preview')->label('Free Preview')->boolean(),
+                TextColumn::make('duration_minutes')
+                    ->label('Durasi')
+                    ->suffix(' menit')
+                    ->alignCenter(),
+                TextColumn::make('questions_count')
+                    ->counts('questions')
+                    ->label('Jumlah Soal')
+                    ->alignCenter(),
+                IconColumn::make('is_free_preview')
+                    ->label('Free Preview')
+                    ->boolean(),
+            ])
+            ->defaultSort('title')
+            ->filters([
+                SelectFilter::make('program_id')
+                    ->label('Program')
+                    ->relationship('program', 'name'),
+                SelectFilter::make('focus_mode')
+                    ->label('Tipe Exam')
+                    ->options([
+                        'all_program' => 'All Program',
+                        'focus_topic' => 'Fokus 1 Topik',
+                    ]),
             ])
             ->recordActions([
                 EditAction::make(),
-                // BARU: cegah delete Exam kalau ada soal ter-attach lewat
-                // Bagian Ujian (exam_sections) di bawahnya. Tanpa ini, Laravel
-                // mencoba hapus exam_sections juga (cascade), lalu DB menolak
-                // mentah-mentah lewat foreign key constraint exam_questions
-                // (error 500) -- sekarang admin dapat pesan yang jelas.
                 DeleteAction::make()
                     ->before(function (DeleteAction $action, Exam $record) {
                         $sectionIds = $record->sections()->pluck('id');
