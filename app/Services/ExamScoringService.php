@@ -102,14 +102,30 @@ class ExamScoringService
 
             foreach ($sectionTotals as $sectionId => $totals) {
                 $section = $sections->get($sectionId);
+
+                // Cap skor section ke max_score kalau diisi, supaya field itu
+                // beneran ditegakkan sistem, bukan cuma display. Log kalau
+                // terjadi capping, biar ketahuan ada mismatch poin soal vs
+                // max_score yang diset di section.
+                $sectionScore = $totals['score'];
+                if ($section?->max_score !== null && $sectionScore > $section->max_score) {
+                    \Log::warning('Section score exceeds max_score, capping applied', [
+                        'exam_attempt_id' => $attempt->id,
+                        'exam_section_id' => $sectionId,
+                        'raw_score' => $sectionScore,
+                        'max_score' => $section->max_score,
+                    ]);
+                    $sectionScore = $section->max_score;
+                }
+
                 $passed = $section?->min_passing_score !== null
-                    ? $totals['score'] >= $section->min_passing_score
+                    ? $sectionScore >= $section->min_passing_score
                     : null;
 
                 ExamAttemptSectionScore::updateOrCreate(
                     ['exam_attempt_id' => $attempt->id, 'exam_section_id' => $sectionId],
                     [
-                        'raw_score' => $totals['score'],
+                        'raw_score' => $sectionScore,
                         'correct_count' => $totals['correct'],
                         'passed_threshold' => $passed,
                     ]
