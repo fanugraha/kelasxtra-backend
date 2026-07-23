@@ -14,7 +14,7 @@ class PackageController extends Controller
      */
     public function index(Request $request)
     {
-        return Package::with('program', 'subject', 'category')
+        return Package::with('program', 'taxonomy')
             ->when($request->filled('program_id'), fn ($q) => $q->where('program_id', $request->program_id))
             ->latest()
             ->get();
@@ -33,7 +33,7 @@ class PackageController extends Controller
         // Guest (belum login, misal dari landing page publik) -> nggak punya
         // enrollment/transaksi buat dipersonalisasi, langsung ke paket terbaru.
         if (! $user) {
-            $packages = Package::with('program', 'subject', 'category')->latest()->take(8)->get();
+            $packages = Package::with('program', 'taxonomy')->latest()->take(8)->get();
 
             return response()->json([
                 'based_on_program_id' => null,
@@ -52,7 +52,7 @@ class PackageController extends Controller
             ->orderByDesc('total')
             ->value('packages.program_id');
 
-        $query = Package::with('program', 'subject', 'category')->whereNotIn('id', $ownedPackageIds);
+        $query = Package::with('program', 'taxonomy')->whereNotIn('id', $ownedPackageIds);
 
         if ($topProgramId) {
             $query->where('program_id', $topProgramId);
@@ -62,7 +62,7 @@ class PackageController extends Controller
 
         // Fallback kalau rekomendasi program kosong.
         if ($packages->isEmpty()) {
-            $packages = Package::with('program', 'subject', 'category')
+            $packages = Package::with('program', 'taxonomy')
                 ->whereNotIn('id', $ownedPackageIds)
                 ->latest()
                 ->take(8)
@@ -84,7 +84,7 @@ class PackageController extends Controller
      */
     public function focusTopics(Request $request)
     {
-        return Package::with('program', 'subject', 'category')
+        return Package::with('program', 'taxonomy')
             ->where('is_focus_topic', true)
             ->when($request->filled('program_id'), fn ($q) => $q->where('program_id', $request->program_id))
             ->latest()

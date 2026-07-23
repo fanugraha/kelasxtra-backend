@@ -235,7 +235,7 @@ class ExamController extends Controller
             return response()->json(['exam_id' => $latestAttempt->exam_id]);
         }
 
-        $exams = Exam::with('bank')->get();
+        $exams = Exam::get();
 
         $fallback = $exams
             ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
@@ -254,7 +254,7 @@ class ExamController extends Controller
     {
         $user = $request->user();
 
-        $exams = Exam::with('bank')->withCount('questions')->get();
+        $exams = Exam::withCount('questions')->get();
 
         $bankInfo = $this->resolveAvailableBanks($exams);
 
@@ -268,7 +268,7 @@ class ExamController extends Controller
                 'passing_score' => $exam->passing_score,
                 'questions_count' => $exam->questions_count,
                 'is_free_preview' => $exam->is_free_preview,
-                'program_id' => $exam->bank->program_id,
+                'program_id' => $bankInfo[$exam->id]['program_ids'][0] ?? null,
                 'program_ids' => $bankInfo[$exam->id]['program_ids'] ?? [],
                 'available_banks' => $bankInfo[$exam->id]['banks'] ?? [],
             ]);
@@ -287,7 +287,6 @@ public function forPackage(Request $request, \App\Models\Package $package)
         $user = $request->user();
 
         $exams = $package->exams()
-            ->with('bank')
             ->withCount('questions')
             ->get();
 
