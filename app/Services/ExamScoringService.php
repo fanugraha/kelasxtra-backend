@@ -56,7 +56,7 @@ class ExamScoringService
                     }
 
                     if ($answer->is_correct) {
-                        $points = $pivot->points ?? 0;
+                        $points = $answer->question->pointCorrect();
                         $score += $points;
                         $correctCount++;
 
@@ -74,7 +74,8 @@ class ExamScoringService
                 // - single_correct (TWK/TIU, default): opsi benar dicek via
                 //   is_correct, poin diambil dari bobot soal di pivot
                 //   exam_questions (BUKAN dari opsi), fallback 1 poin kalau
-                //   bobot belum diisi.
+                //   dari Question::pointCorrect() (override per-soal, fallback ke
+                //   default bank soal).
                 $selectedOption = $answer->question->options->firstWhere('id', $answer->selected_option_id);
                 $scoringType = $sections->get($sectionId)?->scoring_type;
 
@@ -83,7 +84,7 @@ class ExamScoringService
                     $isCorrect = $points > 0;
                 } else {
                     $isCorrect = (bool) ($selectedOption->is_correct ?? false);
-                    $points = $isCorrect ? ($pivot->points ?? 1) : 0;
+                    $points = $isCorrect ? $answer->question->pointCorrect() : 0;
                 }
 
                 $answer->update(['is_correct' => $isCorrect]);
