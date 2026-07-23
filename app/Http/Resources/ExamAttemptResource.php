@@ -119,26 +119,10 @@ class ExamAttemptResource extends JsonResource
             // BARU: status lulus final, dihitung backend supaya konsisten di
             // semua tempat (bukan ditebak frontend). null = exam ini tidak
             // punya aturan kelulusan (Tipe 3), true/false = lulus/tidak (Tipe 1/2).
-            'passed' => $this->when($this->status !== 'in_progress', function () {
-                $exam = $this->exam;
-
-                if ($exam->require_all_sections_pass) {
-                    $sections = $exam->sections;
-                    if ($sections->isEmpty()) {
-                        return null;
-                    }
-                    return $sections->every(function ($section) {
-                        $result = $this->sectionScores->firstWhere('exam_section_id', $section->id);
-                        return $result?->passed_threshold === true;
-                    });
-                }
-
-                if ($exam->passing_score !== null) {
-                    return $this->score >= $exam->passing_score;
-                }
-
-                return null;
-            }),
+            'passed' => $this->when(
+                $this->status !== 'in_progress',
+                fn () => $this->exam->isAttemptPassed($this->resource)
+            ),
             'has_pending_essay' => $this->when(
                 in_array($this->status, ['submitted', 'auto_submitted']),
                 fn () => $this->answers()->where('needs_manual_grading', true)->exists()

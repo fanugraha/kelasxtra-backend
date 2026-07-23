@@ -132,4 +132,43 @@ class Exam extends Model
 
         $section->delete();
     }
+
+    /**
+     * Satu-satunya jalur resmi untuk menentukan status lulus/tidak sebuah
+     * attempt. Sebelumnya logic ini diduplikasi di 3 tempat (ExamController
+     * x2, ExamAttemptResource) dengan celah berbeda-beda -- disatukan di sini
+     * supaya semua endpoint konsisten kalau aturan kelulusan berubah nanti.
+     *
+     * null  = exam ini tidak punya aturan kelulusan sama sekali.
+     * true  = lulus.
+     * false = tidak lulus.
+     */
+    public function isAttemptPassed(ExamAttempt $attempt): ?bool
+    {
+        if ($this->require_all_sections_pass) {
+            $sections = $this->sections;
+
+            if ($sections->isEmpty()) {
+                return null;
+            }
+
+            return $sections->every(function (ExamSection $section) use ($attempt) {
+                // Section tanpa syarat lulus sendiri dianggap otomatis lolos,
+                // bukan bikin keseluruhan attempt gagal terus-terusan.
+                if ($section->min_passing_score === null) {
+                    return true;
+                }
+
+                $result = $attempt->sectionScores->firstWhere('exam_section_id', $section->id);
+
+                return $result?->passed_threshold === true;
+            });
+        }
+
+        if ($this->passing_score !== null) {
+            return $attempt->score >= $this->passing_score;
+        }
+
+        return null;
+    }
 }

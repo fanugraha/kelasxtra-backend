@@ -401,9 +401,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 ];
             });
 
-            $passed = $exam->require_all_sections_pass
-                ? $sections->isNotEmpty() && $sections->every(fn ($s) => $s['passed_threshold'] === true)
-                : $attempt->score >= $exam->passing_score;
+            $passed = $exam->isAttemptPassed($attempt);
 
             return [
                 'attempt_id' => $attempt->id,
@@ -493,9 +491,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 ];
             });
 
-            $passed = $exam->require_all_sections_pass
-                ? $sections->isNotEmpty() && $sections->every(fn ($s) => $s['passed_threshold'] === true)
-                : $attempt->score >= $exam->passing_score;
+            $passed = $exam->isAttemptPassed($attempt);
 
             return [
                 'attempt_id' => $attempt->id,
