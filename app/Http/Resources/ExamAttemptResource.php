@@ -69,9 +69,9 @@ class ExamAttemptResource extends JsonResource
                     'media_type' => $q->media_type,
                     'media_url' => $q->media_url,
                     'type' => $q->type,
-                    'category' => $q->category ? [
-                        'code' => $q->category->code,
-                        'name' => $q->category->name,
+                    'category' => $q->bank->taxonomy ? [
+                        'code' => $q->bank->taxonomy->code,
+                        'name' => $q->bank->taxonomy->name,
                     ] : null,
                     'options' => $q->type === 'pg'
                         ? $q->options->map(fn ($o) => [
