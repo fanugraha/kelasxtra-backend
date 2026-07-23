@@ -539,9 +539,47 @@ public function forPackage(Request $request, \App\Models\Package $package)
 
         $attempt->load(['exam.questions.options', 'exam.questions.bank.taxonomy', 'answers']);
 
-        $questions = $attempt->exam->questions->map(function ($question) use ($attempt) {
+        // Susun ulang soal & opsi sesuai question_order yang tersimpan waktu
+        // attempt dimulai -- supaya urutan yang dilihat siswa di halaman review
+        // PERSIS SAMA dengan urutan yang dia lihat waktu mengerjakan ujian.
+        // Tanpa ini, urutan selalu jatuh ke urutan default relasi (bukan acak),
+        // jadi huruf A/B/C/D/E di review bisa merujuk ke jawaban yang beda
+        // dari yang sebenarnya dipilih siswa -- walau skor tetap akurat karena
+        // pencocokan jawaban pakai selected_option_id, bukan posisi huruf.
+        $order = $attempt->question_order ?? [];
+        $questionOrderIds = $order['questions'] ?? null;
+        $optionOrderByQuestion = collect($order['options'] ?? [])
+            ->keyBy('question_id');
+
+        $questionsById = $attempt->exam->questions->keyBy('id');
+
+        // Fallback ke urutan default relasi kalau attempt lama tidak punya
+        // question_order tersimpan (mis. dibuat sebelum fitur ini ada).
+        $orderedQuestionIds = $questionOrderIds ?? $questionsById->keys()->values();
+
+        $questions = collect($orderedQuestionIds)->map(function ($questionId) use ($questionsById, $attempt, $optionOrderByQuestion) {
+            $question = $questionsById->get($questionId);
+            if (!$question) {
+                return null;
+            }
+
             $answer = $attempt->answers->firstWhere('question_id', $question->id);
             $correctOption = $question->options->firstWhere('is_correct', true);
+
+            $optionsById = $question->options->keyBy('id');
+            $optionOrderIds = $optionOrderByQuestion->get($question->id)['option_ids'] ?? null;
+            $orderedOptionIds = $optionOrderIds ?? $optionsById->keys()->values();
+
+            $orderedOptions = collect($orderedOptionIds)
+                ->map(fn ($optId) => $optionsById->get($optId))
+                ->filter()
+                ->map(fn ($opt) => [
+                    'id' => $opt->id,
+                    'option_text' => $opt->option_text,
+                    'image_url' => $opt->image_url,
+                    'is_correct' => $opt->is_correct,
+                ])
+                ->values();
 
             return [
                 'question_id' => $question->id,
@@ -555,19 +593,14 @@ public function forPackage(Request $request, \App\Models\Package $package)
                     'name' => $question->bank->taxonomy->name,
                 ] : null,
                 'explanation' => $question->explanation,
-                'options' => $question->options->map(fn ($opt) => [
-                    'id' => $opt->id,
-                    'option_text' => $opt->option_text,
-                    'image_url' => $opt->image_url,
-                    'is_correct' => $opt->is_correct,
-                ])->values(),
+                'options' => $orderedOptions,
                 'selected_option_id' => $answer?->selected_option_id,
                 'essay_answer' => $answer?->essay_answer,
                 'correct_option_id' => $correctOption?->id,
                 'is_correct' => $answer?->is_correct,
                 'needs_manual_grading' => $answer?->needs_manual_grading ?? false,
             ];
-        });
+        })->filter();
 
         return response()->json([
             'attempt_id' => $attempt->id,
