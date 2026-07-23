@@ -55,7 +55,8 @@ class Exam extends Model
 
     public function questions(): BelongsToMany
     {
-        return $this->belongsToMany(Question::class, 'exam_questions');
+        return $this->belongsToMany(Question::class, 'exam_questions')
+            ->withPivot(['exam_section_id']);
     }
 
     public function batches(): HasMany
