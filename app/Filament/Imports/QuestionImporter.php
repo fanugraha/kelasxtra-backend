@@ -5,6 +5,7 @@ namespace App\Filament\Imports;
 use App\Models\Question;
 use App\Models\QuestionBank;
 use App\Models\QuestionPassage;
+use App\Models\Topic;
 use Filament\Actions\Imports\ImportColumn;
 use Filament\Actions\Imports\Importer;
 use Filament\Actions\Imports\Exceptions\RowImportFailedException;
@@ -53,6 +54,12 @@ class QuestionImporter extends Importer
                 ->label('Kesulitan (mudah/sedang/sulit)')
                 ->rules(['nullable', 'in:mudah,sedang,sulit'])
                 ->example('sedang'),
+
+            ImportColumn::make('topic_code')
+                ->label('Kode Topik (opsional)')
+                ->rules(['nullable', 'max:255'])
+                ->fillRecordUsing(fn () => null)
+                ->example('SISKUM-01'),
 
             ImportColumn::make('media_type')
                 ->label('Jenis Media')
@@ -137,7 +144,42 @@ class QuestionImporter extends Importer
         return new Question([
             'bank_id' => $bankId,
             'passage_id' => $passageId,
+            'topic_id' => $this->resolveTopicId($bankId),
         ]);
+    }
+
+    /**
+     * topic_code opsional -- soal boleh tidak ditag topik sama sekali
+     * (topic_id tetap null, sesuai desain: mayoritas soal existing belum
+     * ber-topic sampai proses tagging manual selesai). Kalau diisi,
+     * di-resolve ke Topic yang di-scope ke taxonomy_id milik Bank Soal ini
+     * (BUKAN taxonomy_id sembarang) -- supaya 1 kode topik yang sama di
+     * taxonomy/kategori berbeda tidak collide/ketuker. Nama Topic baru
+     * default-nya sama dengan kode-nya; admin bisa rename lewat TopicResource.
+     */
+    protected function resolveTopicId(?int $bankId): ?int
+    {
+        $topicCode = trim((string) ($this->data['topic_code'] ?? ''));
+
+        if ($topicCode === '' || empty($bankId)) {
+            return null;
+        }
+
+        $taxonomyId = QuestionBank::find($bankId)?->taxonomy_id;
+
+        if (empty($taxonomyId)) {
+            return null;
+        }
+
+        return Topic::firstOrCreate(
+            [
+                'taxonomy_id' => $taxonomyId,
+                'code' => $topicCode,
+            ],
+            [
+                'name' => $topicCode,
+            ]
+        )->id;
     }
 
     protected function beforeCreate(): void

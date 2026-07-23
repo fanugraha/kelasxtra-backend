@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Package extends Model
 {
+    protected $appends = ['category'];
+
     use HasFactory;
 
     protected $fillable = [
@@ -61,6 +63,21 @@ class Package extends Model
     public function focusTaxonomy(): BelongsTo
     {
         return $this->belongsTo(Taxonomy::class, 'focus_taxonomy_id');
+    }
+
+    public function getCategoryAttribute()
+    {
+        $taxonomy = $this->is_focus_topic ? $this->focusTaxonomy : $this->taxonomy;
+
+        if (! $taxonomy) {
+            return null;
+        }
+
+        return [
+            'id' => $taxonomy->id,
+            'code' => $taxonomy->code,
+            'name' => $taxonomy->name,
+        ];
     }
 
     public function classes(): HasMany

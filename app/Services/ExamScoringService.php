@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ExamAttempt;
 use App\Models\ExamAttemptSectionScore;
+use App\Models\ExamAttemptTopicScore;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -44,15 +45,21 @@ class ExamScoringService
             $correctCount = 0;
             $hasPendingEssay = false;
             $sectionTotals = [];
+            $topicTotals = [];
 
             foreach ($answers as $answer) {
                 $pivot = $examQuestions->firstWhere('id', $answer->question_id)?->pivot;
                 $sectionId = $pivot?->exam_section_id;
+                $topicId = $answer->question->topic_id;
 
                 if ($answer->question->type === 'essay') {
                     if ($answer->needs_manual_grading) {
                         $hasPendingEssay = true;
                         continue;
+                    }
+
+                    if ($topicId) {
+                        $topicTotals[$topicId]['total'] = ($topicTotals[$topicId]['total'] ?? 0) + 1;
                     }
 
                     if ($answer->is_correct) {
@@ -63,6 +70,10 @@ class ExamScoringService
                         if ($sectionId) {
                             $sectionTotals[$sectionId]['score'] = ($sectionTotals[$sectionId]['score'] ?? 0) + $points;
                             $sectionTotals[$sectionId]['correct'] = ($sectionTotals[$sectionId]['correct'] ?? 0) + 1;
+                        }
+
+                        if ($topicId) {
+                            $topicTotals[$topicId]['correct'] = ($topicTotals[$topicId]['correct'] ?? 0) + 1;
                         }
                     }
                     continue;
@@ -98,6 +109,11 @@ class ExamScoringService
                     $sectionTotals[$sectionId]['score'] = ($sectionTotals[$sectionId]['score'] ?? 0) + $points;
                     $sectionTotals[$sectionId]['correct'] = ($sectionTotals[$sectionId]['correct'] ?? 0) + ($isCorrect ? 1 : 0);
                 }
+
+                if ($topicId) {
+                    $topicTotals[$topicId]['total'] = ($topicTotals[$topicId]['total'] ?? 0) + 1;
+                    $topicTotals[$topicId]['correct'] = ($topicTotals[$topicId]['correct'] ?? 0) + ($isCorrect ? 1 : 0);
+                }
             }
 
             foreach ($sectionTotals as $sectionId => $totals) {
@@ -128,6 +144,16 @@ class ExamScoringService
                         'raw_score' => $sectionScore,
                         'correct_count' => $totals['correct'],
                         'passed_threshold' => $passed,
+                    ]
+                );
+            }
+
+            foreach ($topicTotals as $topicId => $totals) {
+                ExamAttemptTopicScore::updateOrCreate(
+                    ['exam_attempt_id' => $attempt->id, 'topic_id' => $topicId],
+                    [
+                        'correct_count' => $totals['correct'] ?? 0,
+                        'total_count' => $totals['total'] ?? 0,
                     ]
                 );
             }

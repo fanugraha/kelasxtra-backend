@@ -19,6 +19,7 @@ class Question extends Model
         'explanation',
         'point_correct_override',
         'point_wrong_override',
+        'topic_id',
     ];
     public function bank(): BelongsTo
     {
@@ -41,6 +42,10 @@ class Question extends Model
     public function passage(): BelongsTo
     {
         return $this->belongsTo(QuestionPassage::class, 'passage_id');
+    }
+    public function topic(): BelongsTo
+    {
+        return $this->belongsTo(Topic::class);
     }
     public function exam(): BelongsToMany
     {

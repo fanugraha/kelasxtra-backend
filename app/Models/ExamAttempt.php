@@ -90,6 +90,10 @@ class ExamAttempt extends Model
     {
         return $this->hasMany(ExamAttemptSectionScore::class);
     }
+    public function topicScores(): HasMany
+    {
+        return $this->hasMany(ExamAttemptTopicScore::class);
+    }
 
     public function currentSection(): BelongsTo
     {

@@ -8,6 +8,7 @@ use App\Http\Requests\SubmitAnswerRequest;
 use App\Http\Resources\ExamAttemptResource;
 use App\Models\Exam;
 use App\Models\ExamAttempt;
+use App\Models\ExamAttemptTopicScore;
 use App\Models\ExamAttemptSectionScore;
 use App\Models\ExamBatch;
 use App\Services\AccessControlService;
@@ -537,7 +538,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
             ], 422);
         }
 
-        $attempt->load(['exam.questions.options', 'exam.questions.bank.taxonomy', 'answers']);
+        $attempt->load(['exam.questions.options', 'exam.questions.bank.taxonomy', 'exam.questions.topic.taxonomy', 'answers']);
 
         // Susun ulang soal & opsi sesuai question_order yang tersimpan waktu
         // attempt dimulai -- supaya urutan yang dilihat siswa di halaman review
@@ -592,6 +593,11 @@ public function forPackage(Request $request, \App\Models\Package $package)
                     'code' => $question->bank->taxonomy->code,
                     'name' => $question->bank->taxonomy->name,
                 ] : null,
+                'sub_topic' => $question->topic ? [
+                    'id' => $question->topic->id,
+                    'code' => $question->topic->code,
+                    'name' => $question->topic->name,
+                ] : null,
                 'explanation' => $question->explanation,
                 'options' => $orderedOptions,
                 'selected_option_id' => $answer?->selected_option_id,
@@ -608,6 +614,132 @@ public function forPackage(Request $request, \App\Models\Package $package)
             'score' => $attempt->score,
             'correct_count' => $attempt->correct_count,
             'questions' => $questions->values(),
+        ]);
+    }
+
+    /**
+     * GET /api/me/topic-performance?program_id=
+     * Rekap performa siswa per sub-topic (Topic model), diagregasi dari
+     * SEMUA attempt milik siswa yang login, LINTAS SEMUA EXAM dalam 1
+     * program, yang sudah selesai (status != in_progress -- konsisten
+     * dengan konvensi di review() di atas). Dipakai buat dashboard
+     * "Peta Kekuatan & Kelemahan" di Fase 4.
+     *
+     * program_id wajib -- endpoint ini scoped ke 1 program (mis. SKD CPNS
+     * 2026), bukan lintas program sekaligus, supaya topik dari program
+     * yang beda konteks (mis. tryout sekolah vs CPNS) tidak tercampur.
+     */
+    public function topicPerformance(Request $request)
+    {
+        $request->validate([
+            'program_id' => ['required', 'integer', 'exists:programs,id'],
+        ]);
+
+        $user = $request->user();
+        $programId = (int) $request->query('program_id');
+
+        $examIds = Exam::where('program_id', $programId)->pluck('id');
+
+        // created_at per attempt dipakai buat nyortir baris skor tiap topik
+        // dari yang paling baru, supaya bisa dihitung "performa terkini" (lihat
+        // $recentSample di bawah) tanpa query terpisah per topik.
+        $attempts = ExamAttempt::where('user_id', $user->id)
+            ->whereIn('exam_id', $examIds)
+            ->where('status', '!=', 'in_progress')
+            ->orderByDesc('created_at')
+            ->pluck('created_at', 'id');
+
+        $attemptIds = $attempts->keys();
+
+        // Minimal soal terjawab sebelum sebuah topik dianggap punya data yang
+        // cukup untuk ditampilkan persentasenya -- di bawah ini, persentase bisa
+        // sangat menyesatkan (mis. 1 dari 2 soal salah = 50%, padahal sample-nya
+        // terlalu kecil untuk disimpulkan apa-apa).
+        $minSample = 5;
+
+        // Jumlah soal terakhir (dari attempt-attempt paling baru) yang dipakai
+        // buat menghitung "performa terkini", dibandingkan sama akumulasi semua
+        // attempt, supaya siswa yang sudah membaik/menurun kelihatan trend-nya
+        // -- bukan cuma keseret rata-rata dari attempt lama. Disetel sama
+        // dengan $minSample (bukan lebih besar) supaya "terkini" murni dari
+        // attempt-attempt terbaru tanpa perlu nyomot soal dari attempt lama
+        // buat mencapai sample size -- kalau lebih besar dari jumlah soal per
+        // attempt, angka "terkini" jadi kecampur data lama dan bedanya
+        // terlalu tipis buat kelihatan sebagai trend.
+        $recentSample = 5;
+
+        $topicScores = ExamAttemptTopicScore::whereIn('exam_attempt_id', $attemptIds)
+            ->with('topic.taxonomy')
+            ->get()
+            ->filter(fn ($row) => $row->topic !== null)
+            ->groupBy('topic_id')
+            ->map(function ($rows) use ($minSample, $recentSample, $attempts) {
+                $topic = $rows->first()->topic;
+                $correct = $rows->sum('correct_count');
+                $total = $rows->sum('total_count');
+                $hasEnoughData = $total >= $minSample;
+
+                // Urutkan baris topik ini dari attempt paling baru, lalu
+                // akumulasi soal sampai mencapai $recentSample (atau habis).
+                $sortedRows = $rows->sortByDesc(fn ($row) => $attempts[$row->exam_attempt_id] ?? null);
+
+                $recentCorrect = 0;
+                $recentTotal = 0;
+                foreach ($sortedRows as $row) {
+                    if ($recentTotal >= $recentSample) {
+                        break;
+                    }
+                    $recentCorrect += $row->correct_count;
+                    $recentTotal += $row->total_count;
+                }
+
+                $recentHasEnoughData = $recentTotal >= $minSample;
+                $recentPercentage = $recentHasEnoughData ? round($recentCorrect / $recentTotal * 100, 1) : null;
+                $percentage = $hasEnoughData ? round($correct / $total * 100, 1) : null;
+
+                // Trend cuma dihitung kalau dua-duanya (keseluruhan & terkini)
+                // punya sample cukup, dan "terkini" bukan cuma seluruh data yang
+                // sama persis (attempt-nya sedikit) -- kalau sama, nggak ada
+                // perbandingan yang berarti.
+                $trend = null;
+                if ($hasEnoughData && $recentHasEnoughData && $recentTotal < $total) {
+                    $diff = $recentPercentage - $percentage;
+                    if ($diff >= 15) {
+                        $trend = 'up';
+                    } elseif ($diff <= -15) {
+                        $trend = 'down';
+                    } else {
+                        $trend = 'stable';
+                    }
+                }
+
+                return [
+                    'topic_id' => $topic->id,
+                    'topic_code' => $topic->code,
+                    'topic_name' => $topic->name,
+                    'category' => $topic->taxonomy ? [
+                        'id' => $topic->taxonomy->id,
+                        'code' => $topic->taxonomy->code,
+                        'name' => $topic->taxonomy->name,
+                    ] : null,
+                    'correct_count' => $correct,
+                    'total_count' => $total,
+                    'has_enough_data' => $hasEnoughData,
+                    'percentage' => $percentage,
+                    'recent_percentage' => $recentPercentage,
+                    'trend' => $trend,
+                ];
+            })
+            // Topik bersample cukup diurutkan dari yang paling lemah dulu; topik
+            // yang datanya belum cukup ditaruh di akhir supaya tidak nyempil di
+            // antara ranking "terlemah" yang sebenarnya belum valid.
+            ->sortBy(fn ($t) => [$t['has_enough_data'] ? 0 : 1, $t['percentage'] ?? 0])
+            ->values();
+
+        return response()->json([
+            'program_id' => $programId,
+            'attempts_included' => $attemptIds->count(),
+            'topics' => $topicScores,
         ]);
     }
 

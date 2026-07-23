@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\ExamAttemptSectionScore;
 
 class Exam extends Model
 {
@@ -129,6 +130,10 @@ class Exam extends Model
      */
     public function detachSection(ExamSection $section): void
     {
+        if (ExamAttemptSectionScore::where('exam_section_id', $section->id)->exists()) {
+            throw new \Exception('Bagian ujian ini tidak bisa dihapus karena sudah ada siswa yang mengerjakan dan memiliki nilai tersimpan.');
+        }
+
         $this->questions()->wherePivot('exam_section_id', $section->id)->detach();
 
         $section->delete();
