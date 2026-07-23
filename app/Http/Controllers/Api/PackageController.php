@@ -97,6 +97,6 @@ class PackageController extends Controller
      */
     public function show(Package $package)
     {
-        return $package->load('program', 'subject', 'category');
+        return $package->load('program', 'taxonomy');
     }
 }
