@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\UserPrivacyController;
 use App\Http\Controllers\Api\MidtransCallbackController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PackageController;
+use App\Http\Controllers\Api\PerformanceController;
 use App\Http\Controllers\Api\ProgramController;
 use App\Http\Controllers\Api\ExamBatchController;
 use App\Http\Controllers\Api\EnrollmentController;
@@ -109,6 +110,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/exams/{exam}/banks', [ExamController::class, 'banks']);
     Route::get('/exams/{exam}/attempts', [ExamController::class, 'attempts']);
     Route::get('/exam-attempts/{attempt}/review', [ExamController::class, 'review']);
+    Route::get('/me/performance-summary', [PerformanceController::class, 'performanceSummary']);
     Route::get('/me/topic-performance', [ExamController::class, 'topicPerformance']);
     Route::get('/packages/{package}/exams', [ExamController::class, 'forPackage']);
 

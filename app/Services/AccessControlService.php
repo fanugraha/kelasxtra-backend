@@ -48,7 +48,7 @@ class AccessControlService
      * Cek apakah user punya akses full ke breakdown topik & rekomendasi
      * untuk sebuah program, berdasarkan enrollment aktif (pakai scopeActive
      * dari model Enrollment supaya definisi "aktif" cuma di satu tempat)
-     * atau enrollment yang sudah selesai (paket lama tetap bisa dilihat).
+     * atau enrollment yang sudah expired (paket lama tetap bisa dilihat).
      */
     public function hasFullPerformanceAccess(User $user, int $programId): bool
     {
@@ -58,7 +58,7 @@ class AccessControlService
                 $q->where('program_id', $programId);
             })
             ->where(function ($q) {
-                $q->active()->orWhere('status', 'completed');
+                $q->active()->orWhere('status', 'expired');
             })
             ->exists();
     }

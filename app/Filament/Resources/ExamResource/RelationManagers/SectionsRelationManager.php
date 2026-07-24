@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ExamResource\RelationManagers;
 
+use App\Models\Question;
 use App\Models\QuestionBank;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
@@ -11,6 +12,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -22,6 +24,8 @@ class SectionsRelationManager extends RelationManager
     protected static string $relationship = 'sections';
 
     protected static ?string $title = 'Bagian Ujian';
+
+    protected static ?string $description = 'Catatan: kalau kamu baru saja mengubah "Timer per bagian" atau "Wajib lulus semua bagian" di form Exam di atas, klik "Save changes" DULU sebelum Attach Bank Soal -- field Durasi/Skor Minimal Lulus di bawah ini mengikuti pengaturan yang SUDAH TERSIMPAN, bukan yang baru dicentang.';
 
     public function form(Schema $schema): Schema
     {
@@ -90,13 +94,10 @@ class SectionsRelationManager extends RelationManager
                         Select::make('question_bank_id')
                             ->label('Bank Soal')
                             ->required()
+                            ->live()
                             ->options(function () {
                                 $exam = $this->getOwnerRecord();
 
-                                // Fokus Exam (focus_mode/focus_taxonomy_id) sekarang
-                                // jadi sumber kebenaran: kalau Exam di-set "Fokus 1
-                                // Topik", Bank Soal yang boleh dipilih otomatis
-                                // kefilter cuma yang taxonomy_id-nya cocok.
                                 return QuestionBank::where('program_id', $exam->program_id)
                                     ->whereNotNull('taxonomy_id')
                                     ->when(
@@ -110,12 +111,42 @@ class SectionsRelationManager extends RelationManager
                                         $bank->id => $bank->title . ' (' . ($bank->taxonomy->name ?? '-') . ')',
                                     ]);
                             })
-                            ->searchable(),
+                            ->searchable()
+                            // BARU: begitu Bank Soal dipilih, otomatis hitung
+                            // Skor Maksimal dari total poin benar semua soal
+                            // di bank itu, dan isi Skor Minimal Lulus dari
+                            // Taxonomy::passing_grade bank tsb (kalau ada).
+                            // Admin tidak perlu hitung/input manual lagi.
+                            ->afterStateUpdated(function (?string $state, Set $set) {
+                                if (blank($state)) {
+                                    $set('max_score', null);
+                                    $set('min_passing_score', null);
+
+                                    return;
+                                }
+
+                                $bank = QuestionBank::with(['questions', 'taxonomy'])->find($state);
+
+                                if (! $bank) {
+                                    return;
+                                }
+
+                                $maxScore = $bank->questions->sum(fn (Question $question) => $question->pointCorrect());
+                                $set('max_score', $maxScore);
+
+                                $passingGrade = $bank->taxonomy?->passing_grade;
+
+                                if ($passingGrade !== null) {
+                                    $set('min_passing_score', $passingGrade);
+                                }
+                            }),
                         TextInput::make('max_score')
-                            ->label('Skor Maksimal Bagian Ini')
+                            ->label('Skor Maksimal Bagian Ini (otomatis)')
                             ->numeric()
                             ->minValue(1)
-                            ->required(),
+                            ->required()
+                            ->readOnly()
+                            ->helperText('Dihitung otomatis dari total poin benar semua soal di Bank Soal yang dipilih (termasuk override per-soal kalau ada). Tidak perlu diisi manual -- pilih Bank Soal-nya dulu di atas.'),
                         TextInput::make('duration_minutes')
                             ->label('Durasi')
                             ->numeric()
@@ -127,7 +158,7 @@ class SectionsRelationManager extends RelationManager
                             ->label('Skor Minimal Lulus')
                             ->numeric()
                             ->minValue(0)
-                            ->helperText('Kosongkan kalau bagian ini tidak punya passing score sendiri.')
+                            ->helperText('Otomatis terisi dari Passing Grade Kategori/Mapel bank soal ini (kalau ada di Program). Tetap bisa diubah kalau exam ini butuh nilai berbeda.')
                             ->visible(fn () => (bool) $this->getOwnerRecord()->require_all_sections_pass),
                     ])
                     ->action(function (array $data) {
@@ -153,10 +184,6 @@ class SectionsRelationManager extends RelationManager
             ])
             ->recordActions([
                 EditAction::make(),
-                // BARU: cara resmi melepas soal dari section ini (kebalikan
-                // dari "Attach Bank Soal"). Menghapus soal dari section DAN
-                // section itu sendiri sekaligus, supaya Exam induknya bisa
-                // dihapus setelahnya tanpa kena foreign key constraint.
                 Action::make('detachBank')
                     ->label('Detach Bank Soal')
                     ->color('danger')

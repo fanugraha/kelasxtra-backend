@@ -87,33 +87,42 @@ class PracticeLeaderboardService
         $lock = Cache::lock("leaderboard:{$exam->id}:{$periode}", 30);
 
         $lock->block(10, function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now) {
-            // Tangkap rank lama SEBELUM entri dihapus -- setelah delete() di
-            // bawah, rank lama sudah tidak ada di database sama sekali, jadi
-            // ini satu-satunya titik yang bisa dipakai buat deteksi
-            // perubahan rank (dasar notifikasi rank-change).
+            // Tangkap rank lama SEBELUM entri diproses -- dasar deteksi
+            // perubahan rank (notifikasi rank-change).
             $oldRanks = PracticeLeaderboard::where('exam_id', $exam->id)
                 ->where('periode', $periode)
                 ->pluck('ranking', 'user_id');
 
-            DB::transaction(function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now, $oldRanks) {
-                // Bersihkan entri lama untuk exam + periode ini (idempotent)
+            $currentUserIds = $bestAttempts->pluck('user_id');
+
+            DB::transaction(function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now, $oldRanks, $currentUserIds) {
+                // Buang entri lama yang siswanya SUDAH TIDAK ADA lagi di
+                // hasil ranking run ini (mis. attempt-nya dihapus/diganti).
+                // Entri milik siswa yang MASIH ada di ranking sengaja TIDAK
+                // disentuh di sini -- updateOrCreate() di bawah yang akan
+                // meng-update baris itu di tempat, supaya reward_type dan
+                // discount_code yang sudah pernah di-generate tetap utuh
+                // kalau job ini di-retry (fix bug voucher dobel).
                 PracticeLeaderboard::where('exam_id', $exam->id)
                     ->where('periode', $periode)
+                    ->whereNotIn('user_id', $currentUserIds)
                     ->delete();
 
                 foreach ($bestAttempts as $index => $row) {
                     $rank = $index + 1;
                     $userId = $row->user_id;
 
-                    $entry = PracticeLeaderboard::create([
-                        'exam_id' => $exam->id,
-                        'user_id' => $userId,
-                        'periode' => $periode,
-                        'skor_terbaik' => $row->best_score,
-                        'ranking' => $rank,
-                        'reward_type' => null,
-                        'discount_code' => null,
-                    ]);
+                    $entry = PracticeLeaderboard::updateOrCreate(
+                        [
+                            'exam_id' => $exam->id,
+                            'user_id' => $userId,
+                            'periode' => $periode,
+                        ],
+                        [
+                            'skor_terbaik' => $row->best_score,
+                            'ranking' => $rank,
+                        ]
+                    );
 
                     if ($rank <= 3) {
                         $this->assignReward($entry, $rank, $periode, $rewardEligible, $now);
@@ -179,6 +188,14 @@ class PracticeLeaderboardService
      */
     protected function assignReward(PracticeLeaderboard $entry, int $rank, string $periode, bool $rewardEligible, Carbon $now): void
     {
+        // Guard idempotency: kalau entri ini SUDAH pernah diberi reward_type
+        // (dari run sebelumnya, termasuk retry job untuk exam+periode yang
+        // sama), jangan proses ulang -- ini yang mencegah voucher baru
+        // ter-generate dobel untuk siswa yang sama.
+        if (! is_null($entry->reward_type)) {
+            return;
+        }
+
         $rewardTypeMap = [
             1 => 'voucher_gold',
             2 => 'voucher_silver',

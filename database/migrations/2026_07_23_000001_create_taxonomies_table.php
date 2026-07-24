@@ -1,9 +1,7 @@
 <?php
-
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-
 return new class extends Migration
 {
     public function up(): void
@@ -20,15 +18,21 @@ return new class extends Migration
             $table->unsignedBigInteger('legacy_category_id')->nullable();
             $table->unsignedBigInteger('legacy_subject_id')->nullable();
             $table->timestamps();
-
             $table->index(['type', 'program_id']);
             $table->index('legacy_category_id');
             $table->index('legacy_subject_id');
         });
-    }
 
+        Schema::table('exams', function (Blueprint $table) {
+            $table->foreign('focus_taxonomy_id')
+                ->references('id')->on('taxonomies')->nullOnDelete();
+        });
+    }
     public function down(): void
     {
+        Schema::table('exams', function (Blueprint $table) {
+            $table->dropForeign(['focus_taxonomy_id']);
+        });
         Schema::dropIfExists('taxonomies');
     }
 };

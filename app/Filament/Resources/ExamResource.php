@@ -54,10 +54,6 @@ class ExamResource extends Resource
             TextInput::make('title')
                 ->required()
                 ->maxLength(255),
-            // Fokus Exam: sumber kebenaran sekarang di sini, bukan lagi
-            // dihitung dari taxonomy_id section-section yang ter-attach.
-            // Ini yang dipakai buat filter pilihan "Attach Bank Soal" di
-            // bawah, dan nantinya juga dipakai PackageForm buat filter Exam.
             Select::make('focus_mode')
                 ->label('Tipe Exam')
                 ->options([
@@ -91,23 +87,35 @@ class ExamResource extends Resource
                 ->required(fn (Get $get) => $get('focus_mode') === 'focus_topic')
                 ->dehydrateStateUsing(fn (Get $get, $state) => $get('focus_mode') === 'focus_topic' ? $state : null)
                 ->helperText('Cuma nampilin kategori/mapel dari Program yang dipilih di atas.'),
-            TextInput::make('duration_minutes')
-                ->numeric()
-                ->minValue(1)
-                ->required()
-                ->suffix('menit'),
-            TextInput::make('passing_score')
-                ->numeric()
-                ->minValue(0)
-                ->helperText('Kosongkan kalau tidak ada passing score total. Dipakai HANYA kalau "Wajib lulus semua bagian" di bawah TIDAK diaktifkan.'),
+
+            // --- Mode switch: tentukan dulu 2 keputusan ini, baru field angka
+            // di bawahnya otomatis menyesuaikan (live + Get). ---
             Toggle::make('require_all_sections_pass')
                 ->label('Wajib lulus semua bagian (section)')
-                ->helperText('Aktifkan untuk exam bertipe CPNS: siswa harus mencapai skor minimal di SETIAP bagian (TWK/TIU/TKP dst). Kalau aktif, "Passing Score" total di atas diabaikan.')
+                ->live()
+                ->helperText('Aktifkan untuk exam bertipe CPNS: siswa harus mencapai skor minimal di SETIAP bagian (TWK/TIU/TKP dst). Kalau aktif, "Passing Score Total" di bawah disembunyikan dan tidak dipakai.')
                 ->default(false),
+            TextInput::make('passing_score')
+                ->label('Passing Score Total')
+                ->numeric()
+                ->minValue(0)
+                ->visible(fn (Get $get) => ! $get('require_all_sections_pass'))
+                ->helperText('Skor minimal total untuk lulus exam ini. Kosongkan kalau tidak ada.'),
+
             Toggle::make('uses_section_timers')
                 ->label('Timer per bagian (TOEFL-style)')
-                ->helperText('Aktifkan kalau tiap bagian (TWK/TIU/TKP dst) punya waktu SENDIRI-SENDIRI yang berjalan otomatis lanjut ke bagian berikutnya saat habis (mis. TOEFL). Kalau TIDAK aktif, exam pakai satu timer total seperti biasa (mis. CPNS). Wajib isi "Durasi (menit)" di tiap section kalau opsi ini diaktifkan.')
+                ->live()
+                ->helperText('Aktifkan kalau tiap bagian (TWK/TIU/TKP dst) punya waktu SENDIRI-SENDIRI yang berjalan otomatis lanjut ke bagian berikutnya saat habis (mis. TOEFL). Kalau TIDAK aktif, exam pakai satu timer total (mis. CPNS).')
                 ->default(false),
+            TextInput::make('duration_minutes')
+                ->label('Durasi Total Exam')
+                ->numeric()
+                ->minValue(1)
+                ->visible(fn (Get $get) => ! $get('uses_section_timers'))
+                ->required(fn (Get $get) => ! $get('uses_section_timers'))
+                ->suffix('menit')
+                ->helperText('Durasi TOTAL untuk seluruh exam. Kalau "Timer per bagian" di atas AKTIF, field ini disembunyikan -- durasi diatur per bagian lewat tab "Bagian Ujian" SETELAH exam ini disimpan.'),
+
             Toggle::make('is_free_preview')
                 ->label('Free preview (bisa diakses tanpa enrollment)')
                 ->default(false),
@@ -126,8 +134,6 @@ class ExamResource extends Resource
                     ->label('Program')
                     ->badge()
                     ->color('gray'),
-                // Sekarang dibaca langsung dari kolom focus_mode /
-                // relasi focusTaxonomy -- bukan lagi dihitung dari section.
                 TextColumn::make('focus_status')
                     ->label('Fokus')
                     ->state(fn (Exam $record) => $record->focus_mode === 'focus_topic'
