@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ClassRoom;
+use App\Models\Enrollment;
 use App\Models\Exam;
 use App\Models\Material;
 use App\Models\User;
@@ -40,6 +41,25 @@ class AccessControlService
         // jual sebagian exam-nya lewat paket ini.
         return $user->enrollments()->active()
             ->whereHas('package.exams', fn ($q) => $q->where('exams.id', $exam->id))
+            ->exists();
+    }
+
+    /**
+     * Cek apakah user punya akses full ke breakdown topik & rekomendasi
+     * untuk sebuah program, berdasarkan enrollment aktif (pakai scopeActive
+     * dari model Enrollment supaya definisi "aktif" cuma di satu tempat)
+     * atau enrollment yang sudah selesai (paket lama tetap bisa dilihat).
+     */
+    public function hasFullPerformanceAccess(User $user, int $programId): bool
+    {
+        return Enrollment::query()
+            ->where('user_id', $user->id)
+            ->whereHas('package', function ($q) use ($programId) {
+                $q->where('program_id', $programId);
+            })
+            ->where(function ($q) {
+                $q->active()->orWhere('status', 'completed');
+            })
             ->exists();
     }
 }
