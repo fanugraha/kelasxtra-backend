@@ -168,6 +168,8 @@ class ExamResource extends Resource
                     ->boolean(),
             ])
             ->defaultSort('title')
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::Dropdown)
+            ->deferFilters(false)
             ->filters([
                 SelectFilter::make('program_id')
                     ->label('Program')
@@ -189,6 +191,17 @@ class ExamResource extends Resource
                     ->label('Sembunyikan Part Latihan (kelola di halaman Topics)')
                     ->query(fn (Builder $query) => $query->whereNull('topic_id'))
                     ->default(),
+                // Sinyal "exam ini belum siap dipakai" -- section-nya ada
+                // tapi belum ada satupun yang ke-attach ke Bank Soal, atau
+                // exam ini belum punya section sama sekali. Pola quick
+                // filter yang sama seperti "Bank Kosong" di QuestionBanks.
+                Filter::make('belum_ada_bank_soal')
+                    ->label('Belum Ada Bank Soal Terpasang')
+                    ->query(fn (Builder $query) => $query->whereDoesntHave(
+                        'sections',
+                        fn ($q) => $q->whereNotNull('question_bank_id')
+                    ))
+                    ->toggle(),
             ])
             ->recordActions([
                 EditAction::make(),
@@ -210,6 +223,15 @@ class ExamResource extends Resource
                             $action->halt();
                         }
                     }),
+            ])
+            ->emptyStateHeading('Tidak ada Exam yang cocok')
+            ->emptyStateDescription('Coba ubah atau hapus filter yang aktif.')
+            ->emptyStateIcon('heroicon-o-clipboard-document-list')
+            ->emptyStateActions([
+                \Filament\Actions\Action::make('resetFilters')
+                    ->label('Hapus Semua Filter')
+                    ->color('gray')
+                    ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);
     }

@@ -24,4 +24,12 @@ class Topic extends Model
     {
         return $this->hasMany(Exam::class)->orderBy('part_number');
     }
+
+    // Dipakai TopicResource buat hitung Sisa Stok tanpa N+1 query -- lihat
+    // TopicPartGenerator, tiap soal yang sudah "dipakai" untuk sebuah Part
+    // dicatat 1 baris di sini (per topic_id + question_id).
+    public function usedQuestions(): HasMany
+    {
+        return $this->hasMany(TopicUsedQuestion::class);
+    }
 }

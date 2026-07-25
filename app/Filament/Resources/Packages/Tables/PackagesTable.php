@@ -8,6 +8,7 @@ use Filament\Actions\EditAction;
 use Filament\Actions\ReplicateAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
@@ -67,13 +68,35 @@ class PackagesTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::Dropdown)
+            ->deferFilters(false)
             ->filters([
+                // Tab bar dihapus -- Program sekarang jadi filter dropdown
+                // biasa (pola Shopee: kategori yang bisa terus tumbuh
+                // ditaruh di filter, bukan tab).
+                SelectFilter::make('program_id')
+                    ->label('Program')
+                    ->relationship('program', 'name'),
                 SelectFilter::make('is_focus_topic')
                     ->label('Topik')
                     ->options([
                         '1' => 'Fokus 1 Topik',
                         '0' => 'Semua Topik',
                     ]),
+                SelectFilter::make('type')
+                    ->label('Tipe Paket')
+                    ->options(fn () => \App\Models\Package::query()
+                        ->distinct()
+                        ->pluck('type', 'type')),
+                // Sinyal "paket belum siap dijual": mode Fokus Topik aktif
+                // tapi topiknya belum dipilih -- ini yang bikin kolom Topik
+                // nampilin "Belum dipilih" di tabel. Biasanya paket draft
+                // yang lupa dilengkapi, price-nya pun sering masih 0.
+                Filter::make('belum_lengkap')
+                    ->label('Belum Lengkap (Fokus Topik Belum Dipilih)')
+                    ->query(fn ($query) => $query->where('is_focus_topic', true)
+                        ->whereNull('focus_taxonomy_id'))
+                    ->toggle(),
             ])
             ->recordActions([
                 ViewAction::make(),
@@ -88,6 +111,15 @@ class PackagesTable
                         $replica->exams()->sync($record->exams()->pluck('exams.id'));
                     })
                     ->successNotificationTitle('Paket berhasil diduplikat, tinggal ubah exam-nya'),
+            ])
+            ->emptyStateHeading('Tidak ada Paket yang cocok')
+            ->emptyStateDescription('Coba ubah atau hapus filter yang aktif.')
+            ->emptyStateIcon('heroicon-o-cube')
+            ->emptyStateActions([
+                \Filament\Actions\Action::make('resetFilters')
+                    ->label('Hapus Semua Filter')
+                    ->color('gray')
+                    ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

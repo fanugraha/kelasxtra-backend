@@ -29,7 +29,7 @@ class SubscriptionPlanResource extends Resource
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedCreditCard;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Konten Program';
+    protected static string|\UnitEnum|null $navigationGroup = 'Produk & Promosi';
 
     protected static ?int $navigationSort = 2;
 

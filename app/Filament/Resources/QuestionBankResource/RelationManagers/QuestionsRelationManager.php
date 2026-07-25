@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\QuestionBankResource\RelationManagers;
 
+use App\Models\Topic;
 use Filament\Actions\CreateAction;
 use Filament\Actions\ImportAction;
 use App\Filament\Imports\QuestionImporter;
@@ -15,10 +16,12 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 /**
@@ -26,6 +29,12 @@ use Filament\Tables\Table;
  * ditentukan sekali di level Bank Soal itu sendiri (lihat QuestionBankResource),
  * jadi form soal di sini tidak punya field kategori lagi -- semua soal yang
  * dibuat di sini otomatis ikut kategori bank-nya.
+ *
+ * Topik (topic_id) WAJIB bisa dipilih di sini -- ini yang dipakai
+ * TopicPartGenerator buat narik soal per topik saat generate Part Latihan
+ * (fitur Latihan Soal per Topik/Part). Soal yang tidak ditag Topik TIDAK
+ * akan pernah bisa dipakai buat generate Part, jadi field ini penting
+ * kelihatan jelas ke admin, bukan cuma bisa diisi lewat import CSV.
  */
 class QuestionsRelationManager extends RelationManager
 {
@@ -37,8 +46,36 @@ class QuestionsRelationManager extends RelationManager
     {
         $bank = $this->getOwnerRecord();
         $isWeighted = $bank->scoring_type === 'weighted_options';
+        $taxonomyId = $bank->taxonomy_id;
 
         return $schema->components([
+            Select::make('topic_id')
+                ->label('Topik')
+                ->options(fn () => Topic::where('taxonomy_id', $taxonomyId)->pluck('name', 'id'))
+                ->searchable()
+                ->preload()
+                ->native(false)
+                ->createOptionForm([
+                    TextInput::make('code')
+                        ->label('Kode Topik')
+                        ->required()
+                        ->maxLength(255)
+                        ->helperText('Kode singkat unik, mis. "figural" atau "SISKUM-01".'),
+                    TextInput::make('name')
+                        ->label('Nama Topik')
+                        ->required()
+                        ->maxLength(255),
+                ])
+                ->createOptionUsing(function (array $data) use ($taxonomyId) {
+                    return Topic::create([
+                        'taxonomy_id' => $taxonomyId,
+                        'code' => $data['code'],
+                        'name' => $data['name'],
+                    ])->id;
+                })
+                ->helperText('Wajib diisi supaya soal ini bisa ikut dipakai di fitur "Latihan Soal per Topik/Part". Soal tanpa Topik hanya bisa dipakai untuk Exam biasa (Try Out).')
+                ->columnSpanFull(),
+
             Textarea::make('question_text')
                 ->label('Pertanyaan')
                 ->required()
@@ -129,13 +166,34 @@ class QuestionsRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
+        $bank = $this->getOwnerRecord();
+
         return $table
             ->recordTitleAttribute('question_text')
+            ->description(function () use ($bank) {
+                $totalCount = $bank->questions()->count();
+                $taggedCount = $bank->questions()->whereNotNull('topic_id')->count();
+                $untaggedCount = $totalCount - $taggedCount;
+
+                return "Total soal: {$totalCount} · Sudah ditag Topik: {$taggedCount} · Belum ditag: {$untaggedCount}" .
+                    ($untaggedCount > 0 ? ' — ⚠️ soal yang belum ditag Topik tidak bisa dipakai di Latihan Soal per Part.' : '');
+            })
             ->columns([
                 TextColumn::make('question_text')->label('Pertanyaan')->limit(70)->wrap(),
+                TextColumn::make('topic.name')
+                    ->label('Topik')
+                    ->badge()
+                    ->color(fn ($state) => filled($state) ? 'success' : 'danger')
+                    ->placeholder('Belum ditag')
+                    ->default('Belum ditag'),
                 TextColumn::make('type')->badge(),
                 TextColumn::make('difficulty')->badge(),
                 TextColumn::make('options_count')->counts('options')->label('Jml Opsi'),
+            ])
+            ->filters([
+                SelectFilter::make('topic_id')
+                    ->label('Topik')
+                    ->options(fn () => Topic::where('taxonomy_id', $bank->taxonomy_id)->pluck('name', 'id')),
             ])
             ->headerActions([
                 CreateAction::make(),

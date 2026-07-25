@@ -54,6 +54,8 @@ class TransactionsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->defaultSort('created_at', 'desc')
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::Dropdown)
+            ->deferFilters(false)
             ->filters([
                 SelectFilter::make('status')
                     ->label('Status')
@@ -68,6 +70,15 @@ class TransactionsTable
                 ViewAction::make(),
                 EditAction::make(),
                 TransactionResource::markSuccessAction(),
+            ])
+            ->emptyStateHeading('Tidak ada Transaksi yang cocok')
+            ->emptyStateDescription('Coba ubah atau hapus filter yang aktif.')
+            ->emptyStateIcon('heroicon-o-credit-card')
+            ->emptyStateActions([
+                \Filament\Actions\Action::make('resetFilters')
+                    ->label('Hapus Semua Filter')
+                    ->color('gray')
+                    ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->toolbarActions([]);
     }

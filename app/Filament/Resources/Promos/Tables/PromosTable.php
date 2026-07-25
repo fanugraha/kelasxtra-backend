@@ -52,6 +52,8 @@ class PromosTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::Dropdown)
+            ->deferFilters(false)
             ->filters([
                 TernaryFilter::make('is_active')
                     ->label('Status Aktif'),
@@ -59,6 +61,15 @@ class PromosTable
             ->recordActions([
                 ViewAction::make(),
                 EditAction::make(),
+            ])
+            ->emptyStateHeading('Tidak ada Promo yang cocok')
+            ->emptyStateDescription('Coba ubah atau hapus filter yang aktif.')
+            ->emptyStateIcon('heroicon-o-tag')
+            ->emptyStateActions([
+                \Filament\Actions\Action::make('resetFilters')
+                    ->label('Hapus Semua Filter')
+                    ->color('gray')
+                    ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

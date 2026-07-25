@@ -18,6 +18,8 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 class QuestionBankResource extends Resource
@@ -42,17 +44,10 @@ class QuestionBankResource extends Resource
                 ->searchable()
                 ->preload()
                 ->live()
-                // Kalau Program diganti (termasuk gonta-ganti mode), pilihan
-                // Kategori/Mapel di bawah di-reset supaya tidak ada kombinasi
-                // nyasar (misal kepilih Kategori dari Program yang lain).
                 ->afterStateUpdated(function (Get $get, $set) {
                     $set('taxonomy_id', null);
                 })
                 ->helperText('Menentukan apakah Bank Soal ini pakai Kategori (CPNS/BUMN) atau Mapel (Sekolah/Masuk Kuliah), sesuai pola Program ini.'),
-            // Satu dropdown ini menggantikan 2 dropdown lama (Kategori & Mapel).
-            // Yang muncul dan isinya menyesuaikan mode Program yang dipilih:
-            // Program mode Kategori -> pilihan Kategori punya Program itu.
-            // Program mode Mapel -> pilihan Mapel (daftar global).
             Select::make('taxonomy_id')
                 ->label(fn (Get $get) => Program::find($get('program_id'))?->usesSubjectMode() ? 'Mapel' : 'Kategori')
                 ->options(function (Get $get) {
@@ -101,12 +96,73 @@ class QuestionBankResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('title')->searchable()->sortable(),
-                TextColumn::make('program.name')->label('Program'),
+                TextColumn::make('program.name')
+                    ->label('Program')
+                    ->badge()
+                    ->color('gray'),
                 TextColumn::make('taxonomy.name')
                     ->label('Mapel / Kategori')
-                    ->placeholder('—'),
+                    ->placeholder('—')
+                    ->searchable(),
                 TextColumn::make('scoring_type')->badge(),
-                TextColumn::make('questions_count')->counts('questions')->label('Jumlah Soal'),
+                // Badge warna: merah = bank kosong (belum diisi soal sama
+                // sekali) -- sinyal cepat buat admin tanpa harus buka satu-
+                // satu. Sama pola seperti kolom "Jumlah Soal" di TopicResource.
+                TextColumn::make('questions_count')
+                    ->counts('questions')
+                    ->label('Jumlah Soal')
+                    ->badge()
+                    ->color(fn (int $state): string => $state === 0 ? 'danger' : 'gray')
+                    ->formatStateUsing(fn (int $state): string => $state === 0 ? 'Kosong' : (string) $state)
+                    ->sortable(),
+            ])
+            ->defaultSort('title')
+            // 25 per halaman -- dengan Tab per Program (lihat ListQuestionBanks),
+            // jumlah bank soal per tab tetap kecil meski total lintas semua
+            // Program sudah banyak.
+            ->defaultPaginationPageOption(25)
+            ->paginated([25, 50, 100])
+            ->recordUrl(fn (QuestionBank $record) => static::getUrl('edit', ['record' => $record]))
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::Dropdown)
+            ->deferFilters(false)
+            ->filters([
+                // Tab bar dihapus -- Program sekarang jadi filter dropdown
+                // biasa (pola Shopee: kategori yang bisa terus tumbuh
+                // ditaruh di filter, bukan tab).
+                SelectFilter::make('program_id')
+                    ->label('Program')
+                    ->relationship('program', 'name'),
+                SelectFilter::make('taxonomy_id')
+                    ->label('Mapel / Kategori')
+                    ->options(fn () => Taxonomy::query()
+                        ->with('program')
+                        ->get()
+                        ->mapWithKeys(fn ($taxonomy) => [
+                            $taxonomy->id => $taxonomy->name . ' (' . ($taxonomy->program->name ?? '-') . ')',
+                        ]))
+                    ->searchable(),
+                SelectFilter::make('scoring_type')
+                    ->label('Tipe Penilaian')
+                    ->options([
+                        'single_correct' => 'Single Correct',
+                        'weighted_options' => 'Weighted Options',
+                    ]),
+                // Quick filter paling sering dicari admin: bank yang masih
+                // kosong (butuh segera diisi soal). Sama pola seperti
+                // Filter::make('belum_ada_soal') di TopicResource.
+                Filter::make('bank_kosong')
+                    ->label('Bank Kosong (Belum Ada Soal)')
+                    ->query(fn ($query) => $query->whereDoesntHave('questions'))
+                    ->toggle(),
+            ])
+            ->emptyStateHeading('Tidak ada Bank Soal yang cocok')
+            ->emptyStateDescription('Coba ubah atau hapus filter yang aktif.')
+            ->emptyStateIcon('heroicon-o-archive-box-x-mark')
+            ->emptyStateActions([
+                \Filament\Actions\Action::make('resetFilters')
+                    ->label('Hapus Semua Filter')
+                    ->color('gray')
+                    ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
             ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);

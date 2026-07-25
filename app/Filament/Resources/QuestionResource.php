@@ -101,7 +101,19 @@ class QuestionResource extends Resource
                 TextColumn::make('difficulty')->badge(),
                 TextColumn::make('options_count')->counts('options')->label('Jumlah Opsi'),
             ])
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::Dropdown)
+            ->deferFilters(false)
             ->filters([
+                // Tab bar dihapus -- Bank Soal sekarang jadi filter dropdown
+                // searchable (pola Shopee: kategori yang bisa terus tumbuh
+                // ditaruh di filter, bukan tab). Sebelumnya tab per Bank Soal
+                // bikin baris tab horizontal-scroll begitu Bank Soal sudah
+                // banyak (lihat screenshot arsip: TIU/TKP/TWK Paket 1-3+).
+                SelectFilter::make('bank_id')
+                    ->label('Bank Soal')
+                    ->relationship('bank', 'title')
+                    ->searchable()
+                    ->preload(),
                 SelectFilter::make('program')
                     ->label('Program')
                     ->options(Program::pluck('name', 'id'))
@@ -114,6 +126,15 @@ class QuestionResource extends Resource
                             $q->where('program_id', $data['value']);
                         });
                     }),
+            ])
+            ->emptyStateHeading('Tidak ada Soal yang cocok')
+            ->emptyStateDescription('Coba ubah atau hapus filter yang aktif.')
+            ->emptyStateIcon('heroicon-o-question-mark-circle')
+            ->emptyStateActions([
+                \Filament\Actions\Action::make('resetFilters')
+                    ->label('Hapus Semua Filter')
+                    ->color('gray')
+                    ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->recordActions([ViewAction::make()]);
     }
