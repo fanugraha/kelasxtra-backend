@@ -23,6 +23,8 @@ class Exam extends Model
         'uses_section_timers',
         'focus_mode',
         'focus_taxonomy_id',
+        'topic_id',
+        'part_number',
     ];
 
     protected function casts(): array
@@ -42,6 +44,11 @@ class Exam extends Model
     public function focusTaxonomy(): BelongsTo
     {
         return $this->belongsTo(Taxonomy::class, 'focus_taxonomy_id');
+    }
+
+    public function topic(): BelongsTo
+    {
+        return $this->belongsTo(Topic::class);
     }
 
     public function isFocusTopic(): bool
@@ -159,8 +166,6 @@ class Exam extends Model
             }
 
             return $sections->every(function (ExamSection $section) use ($attempt) {
-                // Section tanpa syarat lulus sendiri dianggap otomatis lolos,
-                // bukan bikin keseluruhan attempt gagal terus-terusan.
                 if ($section->min_passing_score === null) {
                     return true;
                 }
@@ -176,5 +181,10 @@ class Exam extends Model
         }
 
         return null;
+    }
+
+    public function packages()
+    {
+        return $this->belongsToMany(\App\Models\Package::class, 'package_exam');
     }
 }

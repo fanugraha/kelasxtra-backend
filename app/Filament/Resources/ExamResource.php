@@ -20,10 +20,12 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
@@ -93,7 +95,7 @@ class ExamResource extends Resource
             Toggle::make('require_all_sections_pass')
                 ->label('Wajib lulus semua bagian (section)')
                 ->live()
-                ->helperText('Aktifkan untuk exam bertipe CPNS: siswa harus mencapai skor minimal di SETIAP bagian (TWK/TIU/TKP dst). Kalau aktif, "Passing Score Total" di bawah disembunyikan dan tidak dipakai.')
+                ->helperText('Aktifkan untuk exam bertipe CPNS: siswa harus mencapai skor minimal di SETIAP bagian (TWK/TIU/TKP dst).Kalau aktif, "Passing Score Total" di bawah disembunyikan dan tidak dipakai.')
                 ->default(false),
             TextInput::make('passing_score')
                 ->label('Passing Score Total')
@@ -176,6 +178,17 @@ class ExamResource extends Resource
                         'all_program' => 'All Program',
                         'focus_topic' => 'Fokus 1 Topik',
                     ]),
+                // Exam "Part per Topik" (dijual lewat Subscription) dikelola
+                // sepenuhnya lewat halaman Topics -> Edit Topik -> Part Latihan,
+                // BUKAN di sini. Halaman ini khusus Exam satuan (dijual lewat
+                // Enrollment/beli langsung). Filter ini nyembunyiin Part secara
+                // default supaya daftar Exam satuan tidak "tenggelam" saat
+                // jumlah Part per topik makin banyak -- tapi tetap bisa
+                // dimatikan kalau admin sesekali perlu lihat semuanya.
+                Filter::make('sembunyikan_part')
+                    ->label('Sembunyikan Part Latihan (kelola di halaman Topics)')
+                    ->query(fn (Builder $query) => $query->whereNull('topic_id'))
+                    ->default(),
             ])
             ->recordActions([
                 EditAction::make(),

@@ -19,4 +19,9 @@ class Topic extends Model
     {
         return $this->hasMany(Question::class);
     }
+
+    public function exams(): HasMany
+    {
+        return $this->hasMany(Exam::class)->orderBy('part_number');
+    }
 }

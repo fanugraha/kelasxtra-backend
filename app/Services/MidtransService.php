@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Package;
 use App\Models\Promo;
 use App\Models\Transaction;
+use App\Models\SubscriptionPlan;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -91,7 +92,7 @@ class MidtransService
         $package = $transaction->package;
         $amount = (float) $transaction->amount;
 
-        if ($transaction->promo_id && $transaction->promo) {
+        if ($transaction->promo_id && $transaction->promo && $transaction->package) {
             $error = $transaction->promo->checkUsableBy($user, $package);
 
             if ($error) {
@@ -158,5 +159,57 @@ class MidtransService
         $sequence = $lastNumber ? ((int) substr($lastNumber, -4)) + 1 : 1;
 
         return $prefix.str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+    }
+
+    public function createSubscriptionTransaction(User $user, SubscriptionPlan $plan, array $selectedProgramIds = [], ?Promo $promo = null): Transaction
+    {
+        $basePrice = (float) $plan->price;
+
+        $discountAmount = $promo ? $promo->calculateDiscount($plan) : 0;
+
+        $amount = max($basePrice - $discountAmount, 0);
+        $orderId = $this->generatePlanOrderId($plan);
+
+        $transaction = Transaction::create([
+            'user_id' => $user->id,
+            'plan_id' => $plan->id,
+            'promo_id' => $promo?->id,
+            'selected_program_ids' => $plan->program_slot_count ? $selectedProgramIds : null,
+            'midtrans_order_id' => $orderId,
+            'invoice_number' => $this->generateInvoiceNumber(),
+            'amount' => $amount,
+            'discount_amount' => $discountAmount,
+            'payment_method' => null,
+            'status' => 'pending',
+            'expires_at' => now()->addHours(self::SNAP_EXPIRY_HOURS),
+        ]);
+
+        $snapToken = Snap::getSnapToken([
+            'transaction_details' => [
+                'order_id' => $orderId,
+                'gross_amount' => (int) round($amount),
+            ],
+            'customer_details' => [
+                'first_name' => $user->name,
+                'email' => $user->email,
+            ],
+            'item_details' => [
+                [
+                    'id' => 'plan-'.$plan->id,
+                    'price' => (int) round($amount),
+                    'quantity' => 1,
+                    'name' => Str::limit($plan->name, 50, ''),
+                ]
+            ],
+        ]);
+
+        $transaction->setAttribute('snap_token', $snapToken);
+
+        return $transaction;
+    }
+
+    protected function generatePlanOrderId(SubscriptionPlan $plan): string
+    {
+        return sprintf('KX-SUB-%d-%s-%s', $plan->id, now()->format('YmdHis'), Str::upper(Str::random(6)));
     }
 }

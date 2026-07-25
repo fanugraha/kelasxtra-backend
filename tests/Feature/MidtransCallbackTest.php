@@ -268,4 +268,172 @@ class MidtransCallbackTest extends TestCase
             'status' => 'expired',
         ]);
     }
+    protected function makePlan(array $overrides = []): \App\Models\SubscriptionPlan
+    {
+        $program = Program::factory()->create();
+
+        return \App\Models\SubscriptionPlan::factory()->create(array_merge([
+            'program_id' => $program->id,
+            'program_slot_count' => null,
+            'price' => 150000,
+            'duration_days' => 30,
+        ], $overrides));
+    }
+
+    protected function makeSubscriptionTransaction(array $overrides = []): Transaction
+    {
+        $user = User::factory()->create();
+        $plan = $this->makePlan();
+
+        return Transaction::create(array_merge([
+            'user_id' => $user->id,
+            'plan_id' => $plan->id,
+            'selected_program_ids' => [$plan->program_id],
+            'midtrans_order_id' => 'ORDER-SUB-'.uniqid(),
+            'invoice_number' => 'INV-SUB-'.uniqid(),
+            'amount' => 150000,
+            'discount_amount' => 0,
+            'payment_method' => null,
+            'status' => 'pending',
+            'expires_at' => now()->addHours(24),
+        ], $overrides));
+    }
+
+    public function test_settlement_untuk_transaksi_subscription_mengaktifkan_subscription_dan_sync_program(): void
+    {
+        $transaction = $this->makeSubscriptionTransaction();
+        $signature = $this->validSignature($transaction->midtrans_order_id, '200', '150000.00');
+
+        $response = $this->postCallback([
+            'order_id' => $transaction->midtrans_order_id,
+            'status_code' => '200',
+            'gross_amount' => '150000.00',
+            'transaction_status' => 'settlement',
+            'payment_type' => 'bank_transfer',
+            'signature_key' => $signature,
+        ]);
+
+        $response->assertOk();
+
+        $transaction->refresh();
+        $this->assertSame('success', $transaction->status);
+        $this->assertNotNull($transaction->paid_at);
+
+        $this->assertDatabaseHas('subscriptions', [
+            'user_id' => $transaction->user_id,
+            'plan_id' => $transaction->plan_id,
+            'status' => 'active',
+        ]);
+
+        $subscription = \App\Models\Subscription::where('user_id', $transaction->user_id)
+            ->where('plan_id', $transaction->plan_id)
+            ->first();
+
+        $this->assertNotNull($subscription);
+        $this->assertTrue(
+            $subscription->programs()->pluck('programs.id')->contains($transaction->selected_program_ids[0])
+        );
+    }
+
+    public function test_settlement_untuk_transaksi_subscription_tidak_menyentuh_tabel_enrollments(): void
+    {
+        // Regression test: sebelum fix, blok Enrollment::updateOrCreate() jalan
+        // untuk SEMUA transaksi sukses tanpa cek package_id, yang akan crash
+        // (package_id null) atau bikin baris enrollment sampah untuk transaksi
+        // subscription murni.
+        $transaction = $this->makeSubscriptionTransaction();
+        $signature = $this->validSignature($transaction->midtrans_order_id, '200', '150000.00');
+
+        $response = $this->postCallback([
+            'order_id' => $transaction->midtrans_order_id,
+            'status_code' => '200',
+            'gross_amount' => '150000.00',
+            'transaction_status' => 'settlement',
+            'signature_key' => $signature,
+        ]);
+
+        $response->assertOk();
+
+        $this->assertDatabaseMissing('enrollments', [
+            'user_id' => $transaction->user_id,
+        ]);
+    }
+
+    public function test_settlement_untuk_transaksi_subscription_multi_program_sync_semua_program(): void
+    {
+        $programA = Program::factory()->create();
+        $programB = Program::factory()->create();
+        $plan = \App\Models\SubscriptionPlan::factory()->multiProgram(2)->create();
+        $user = User::factory()->create();
+
+        $transaction = Transaction::create([
+            'user_id' => $user->id,
+            'plan_id' => $plan->id,
+            'selected_program_ids' => [$programA->id, $programB->id],
+            'midtrans_order_id' => 'ORDER-SUB-MULTI-'.uniqid(),
+            'invoice_number' => 'INV-SUB-MULTI-'.uniqid(),
+            'amount' => 250000,
+            'discount_amount' => 0,
+            'payment_method' => null,
+            'status' => 'pending',
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        $signature = $this->validSignature($transaction->midtrans_order_id, '200', '250000.00');
+
+        $response = $this->postCallback([
+            'order_id' => $transaction->midtrans_order_id,
+            'status_code' => '200',
+            'gross_amount' => '250000.00',
+            'transaction_status' => 'settlement',
+            'signature_key' => $signature,
+        ]);
+
+        $response->assertOk();
+
+        $subscription = \App\Models\Subscription::where('user_id', $user->id)
+            ->where('plan_id', $plan->id)
+            ->first();
+
+        $this->assertNotNull($subscription);
+        $coveredIds = $subscription->programs()->pluck('programs.id')->toArray();
+        $this->assertContains($programA->id, $coveredIds);
+        $this->assertContains($programB->id, $coveredIds);
+    }
+
+    public function test_transisi_subscription_success_ke_refunded_mencabut_subscription(): void
+    {
+        $transaction = $this->makeSubscriptionTransaction(['status' => 'success', 'paid_at' => now()->subDay()]);
+
+        $subscription = \App\Models\Subscription::factory()->create([
+            'user_id' => $transaction->user_id,
+            'plan_id' => $transaction->plan_id,
+            'transaction_id' => $transaction->id,
+            'status' => 'active',
+            'start_date' => now()->subDay(),
+            'end_date' => now()->addDays(29),
+        ]);
+
+        $signature = $this->validSignature($transaction->midtrans_order_id, '200', '150000.00');
+
+        $response = $this->postCallback([
+            'order_id' => $transaction->midtrans_order_id,
+            'status_code' => '200',
+            'gross_amount' => '150000.00',
+            'transaction_status' => 'refund',
+            'signature_key' => $signature,
+        ]);
+
+        $response->assertOk();
+
+        $transaction->refresh();
+        $this->assertSame('refunded', $transaction->status);
+
+        // Transaction::booted() harus otomatis mencabut subscription saat refunded.
+        $this->assertDatabaseHas('subscriptions', [
+            'id' => $subscription->id,
+            'status' => 'expired',
+        ]);
+    }
+
 }

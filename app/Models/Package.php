@@ -48,6 +48,24 @@ class Package extends Model
                 throw new \InvalidArgumentException('Package harus punya program_id atau taxonomy_id.');
             }
         });
+
+        // Cegah hapus Package yang masih ada Exam/Part nempel di dalamnya.
+        // Kalau dipaksa hapus, koneksi Exam <-> Package ikut hilang diam-diam
+        // (foreign key cascadeOnDelete di tabel package_exam) dan Exam itu
+        // jadi tidak bisa diakses siapa pun tanpa ada tanda peringatan.
+        static::deleting(function (self $package) {
+            $examCount = $package->exams()->count();
+
+            if ($examCount > 0) {
+                $examTitles = $package->exams()->pluck('title')->implode(', ');
+
+                throw new \RuntimeException(
+                    "Package \"{$package->name}\" (#{$package->id}) tidak bisa dihapus karena masih " .
+                    "menaungi {$examCount} Exam/Part: {$examTitles}. " .
+                    "Pindahkan dulu Exam-exam itu ke Package lain sebelum menghapus Package ini."
+                );
+            }
+        });
     }
 
     public function program(): BelongsTo

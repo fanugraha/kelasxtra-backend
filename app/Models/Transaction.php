@@ -15,6 +15,8 @@ class Transaction extends Model
     protected $fillable = [
         'user_id',
         'package_id',
+        'plan_id',
+        'selected_program_ids',
         'promo_id',
         'midtrans_order_id',
         'invoice_number',
@@ -33,6 +35,7 @@ class Transaction extends Model
             'discount_amount' => 'decimal:2',
             'paid_at' => 'datetime',
             'expires_at' => 'datetime',
+            'selected_program_ids' => 'array',
         ];
     }
 
@@ -44,6 +47,11 @@ class Transaction extends Model
     public function package(): BelongsTo
     {
         return $this->belongsTo(Package::class);
+    }
+
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(SubscriptionPlan::class, 'plan_id');
     }
 
     public function promo(): BelongsTo
@@ -61,6 +69,11 @@ class Transaction extends Model
         return $this->hasOne(Enrollment::class);
     }
 
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(Subscription::class, 'transaction_id');
+    }
+
     // Sinkronisasi otomatis: apa pun cara status transaksi berubah (webhook,
     // reconcile job, atau admin edit manual lewat Filament), enrollment
     // terkait ikut disesuaikan.
@@ -75,20 +88,33 @@ class Transaction extends Model
 
             $enrollment = $transaction->enrollment;
 
-            if (! $enrollment) {
-                return;
+            if ($enrollment) {
+                match ($transaction->status) {
+                    'success' => $enrollment->update([
+                        'status' => 'active',
+                        'start_date' => $enrollment->start_date ?? now(),
+                    ]),
+                    'failed', 'expired', 'refunded' => $enrollment->update([
+                        'status' => 'expired',
+                    ]),
+                    default => null,
+                };
             }
 
-            match ($transaction->status) {
-                'success' => $enrollment->update([
-                    'status' => 'active',
-                    'start_date' => $enrollment->start_date ?? now(),
-                ]),
-                'failed', 'expired', 'refunded' => $enrollment->update([
-                    'status' => 'expired',
-                ]),
-                default => null,
-            };
+            $subscription = $transaction->subscription;
+
+            if ($subscription) {
+                match ($transaction->status) {
+                    'success' => $subscription->update([
+                        'status' => 'active',
+                        'start_date' => $subscription->start_date ?? now(),
+                    ]),
+                    'failed', 'expired', 'refunded' => $subscription->update([
+                        'status' => 'expired',
+                    ]),
+                    default => null,
+                };
+            }
         });
     }
 }

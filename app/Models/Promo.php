@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\SubscriptionPlan;
+
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -60,7 +62,7 @@ class Promo extends Model
      *
      * Return null kalau lolos semua, atau string pesan error kalau ditolak.
      */
-    public function checkUsableBy(User $user, Package $package): ?string
+    public function checkUsableBy(User $user, Package|SubscriptionPlan $item): ?string
     {
         if (! $this->is_active) {
             return 'Kode promo tidak lagi aktif.';
@@ -78,8 +80,13 @@ class Promo extends Model
             return 'Kode promo sudah kedaluwarsa.';
         }
 
-        if ($this->applicable_package_id && $this->applicable_package_id !== $package->id) {
-            return 'Kode promo tidak berlaku untuk paket ini.';
+        // applicable_package_id men-scope promo ke 1 Package spesifik.
+        // Kalau di-set, promo cuma valid untuk checkout Package itu -- bukan
+        // untuk subscription plan manapun (scoping plan belum didukung).
+        if ($this->applicable_package_id) {
+            if (! ($item instanceof Package) || $this->applicable_package_id !== $item->id) {
+                return 'Kode promo tidak berlaku untuk paket ini.';
+            }
         }
 
         if ($this->new_user_only) {
@@ -120,9 +127,12 @@ class Promo extends Model
      * Hitung nominal potongan untuk paket tertentu, sudah termasuk cap
      * max_discount_amount dan pembatasan tidak melebihi harga paket.
      */
-    public function calculateDiscount(Package $package): float
+    public function calculateDiscount(Package|SubscriptionPlan $item): float
     {
-        $basePrice = (float) ($package->discount_price ?? $package->price);
+        // SubscriptionPlan tidak punya discount_price seperti Package.
+        $basePrice = $item instanceof Package
+            ? (float) ($item->discount_price ?? $item->price)
+            : (float) $item->price;
 
         $discountAmount = $this->discount_type === 'percentage'
             ? $basePrice * ((float) $this->discount_value / 100)

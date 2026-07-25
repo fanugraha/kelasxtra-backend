@@ -13,4 +13,11 @@ class EditTopic extends EditRecord
     {
         return [DeleteAction::make()];
     }
+
+    public function getRelationManagers(): array
+    {
+        return [
+            \App\Filament\Resources\TopicResource\RelationManagers\PartsRelationManager::class,
+        ];
+    }
 }

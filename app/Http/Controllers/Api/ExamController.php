@@ -68,6 +68,18 @@ class ExamController extends Controller
             ], 403);
         }
 
+        // Untuk exam yang merupakan bagian dari rangkaian part (Latihan Fokus),
+        // canAttemptExam() di atas cuma mengecek enrollment -- belum mengecek
+        // urutan part. canAccessExamPart() menambahkan cek itu; kalau gagal
+        // di sini (bukan di atas), artinya penyebabnya SPESIFIK karena belum
+        // menyelesaikan part sebelumnya, bukan karena kurang akses paket.
+        if (!$this->accessControl->canAccessExamPart($user, $exam)) {
+            return response()->json([
+                'message' => 'Selesaikan part sebelumnya terlebih dahulu sebelum mengerjakan part ini.',
+                'reason' => 'previous_part_incomplete',
+            ], 403);
+        }
+
         $batchId = $request->validated('exam_batch_id');
         $batch = null;
 
@@ -296,11 +308,18 @@ public function forPackage(Request $request, \App\Models\Package $package)
         return $exams
             ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
             ->values()
-            ->flatMap(function (Exam $exam) use ($bankInfo) {
+            ->flatMap(function (Exam $exam) use ($bankInfo, $user) {
                 $banks = $bankInfo[$exam->id]['banks'] ?? [];
 
                 // Exam lama / data belum rapi yang belum punya bank jelas --
                 // tetap tampil sebagai 1 card biasa, jangan hilang dari daftar.
+                // Latihan Fokus: exam ini bagian dari rangkaian part per topik.
+                // is_locked dihitung terpisah dari filter akses paket di atas --
+                // exam TETAP muncul di daftar meski part sebelumnya belum selesai,
+                // supaya siswa lihat semua part yang ada (bukan hilang begitu saja),
+                // tapi frontend perlu tahu part mana yang masih terkunci.
+                $isLocked = !$this->accessControl->canAccessExamPart($user, $exam);
+
                 if (empty($banks)) {
                     return collect([[
                         'exam_id' => $exam->id,
@@ -310,6 +329,8 @@ public function forPackage(Request $request, \App\Models\Package $package)
                         'passing_score' => $exam->passing_score,
                         'questions_count' => $exam->questions_count,
                         'is_free_preview' => $exam->is_free_preview,
+                        'part_number' => $exam->part_number,
+                        'is_locked' => $isLocked,
                     ]]);
                 }
 
@@ -324,6 +345,8 @@ public function forPackage(Request $request, \App\Models\Package $package)
                     'passing_score' => $exam->passing_score,
                     'questions_count' => $bank['questions_count'] ?? 0,
                     'is_free_preview' => $exam->is_free_preview,
+                    'part_number' => $exam->part_number,
+                    'is_locked' => $isLocked,
                 ]);
             })
             ->values();

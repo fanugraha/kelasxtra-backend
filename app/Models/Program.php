@@ -63,4 +63,14 @@ class Program extends Model
             ->where('taxonomies.type', 'subject')
             ->distinct();
     }
+
+    public function subscriptionPlans()
+    {
+        return $this->hasMany(\App\Models\SubscriptionPlan::class);
+    }
+
+    public function subscriptions()
+    {
+        return $this->belongsToMany(\App\Models\Subscription::class, 'subscription_programs');
+    }
 }

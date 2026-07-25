@@ -9,9 +9,23 @@ class ProgramFactory extends Factory
 {
     protected $model = Program::class;
 
+    // Nama program dari daftar realistis, bukan kata acak Faker --
+    // supaya UI (dropdown kategori, card promo, badge plan langganan) tidak
+    // pernah menampilkan teks seperti "repudiandae sunt temporibus".
+    protected static array $realisticNames = [
+        'SKD CPNS',
+        'Sekolah Kedinasan',
+        'PPPK Guru',
+        'PPPK Non-Guru',
+        'TOEFL Preparation',
+        'Tes Potensi Akademik',
+        'Psikotes Kerja',
+        'UTBK SNBT',
+    ];
+
     public function definition(): array
     {
-        $name = $this->faker->unique()->words(3, true);
+        $name = $this->faker->unique()->randomElement(static::$realisticNames);
 
         return [
             'brand_id' => null,

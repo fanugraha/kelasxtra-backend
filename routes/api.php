@@ -13,10 +13,12 @@ use App\Http\Controllers\Api\UserPrivacyController;
 use App\Http\Controllers\Api\MidtransCallbackController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PackageController;
+use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\PerformanceController;
 use App\Http\Controllers\Api\ProgramController;
 use App\Http\Controllers\Api\ExamBatchController;
 use App\Http\Controllers\Api\EnrollmentController;
+use App\Http\Controllers\Api\TopicPracticeController;
 use App\Http\Controllers\Api\ArticleController;
 use App\Http\Controllers\Api\PromoController;
 use App\Http\Controllers\Api\TutorController;
@@ -59,6 +61,7 @@ Route::get('/programs', [ProgramController::class, 'index']);
 Route::get('/packages', [PackageController::class, 'index']);
 Route::get('/packages/recommended', [PackageController::class, 'recommended']);
 Route::get('/packages/focus-topics', [PackageController::class, 'focusTopics']);
+Route::get('/subscription-plans', [SubscriptionController::class, 'plans']);
 Route::get('/packages/{package}', [PackageController::class, 'show']);
 Route::get('/articles', [ArticleController::class, 'index']);
 Route::get('/articles/{slug}', [ArticleController::class, 'show']);
@@ -87,6 +90,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/transactions/checkout', [TransactionController::class, 'checkout'])
         ->middleware('throttle:10,1'); // section 11: cegah spam checkout ke Midtrans
     Route::get('/transactions', [TransactionController::class, 'index']);
+    Route::get('/my-subscription', [SubscriptionController::class, 'mySubscription']);
     Route::get('/transactions/{transaction}', [TransactionController::class, 'show']);
     Route::post('/transactions/{transaction}/resume', [TransactionController::class, 'resume'])
         ->middleware('throttle:10,1'); // section 11: cegah spam resume ke Midtrans
@@ -139,6 +143,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/my-packages', [EnrollmentController::class, 'index']);
 
+    // Latihan Soal per Topik/Part -- katalog TERBUKA (bukan "dimiliki" lewat
+    // Package/Enrollment). Part 1 tiap topik gratis untuk siapa saja yang
+    // login, Part 2+ butuh Subscription aktif yang meng-cover Program terkait.
+    // Lihat AccessControlService::canAccessExamPart() untuk aturan aksesnya.
+    Route::get('/latihan-soal/categories', [TopicPracticeController::class, 'categories']);
+    Route::get('/latihan-soal/categories/{taxonomy}/topics', [TopicPracticeController::class, 'topics']);
+    Route::get('/latihan-soal/topics/{topic}/roadmap', [TopicPracticeController::class, 'roadmap']);
 
 });
 

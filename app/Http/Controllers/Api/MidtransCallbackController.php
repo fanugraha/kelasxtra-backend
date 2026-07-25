@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Enrollment;
 use App\Models\Transaction;
+use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -91,7 +92,7 @@ class MidtransCallbackController extends Controller
             // Transaction::booted() otomatis mencabut/mengaktifkan enrollment
             // berdasarkan perubahan status di atas (termasuk untuk 'refunded').
 
-            if ($newStatus === 'success') {
+            if ($newStatus === 'success' && $transaction->package_id) {
                 Enrollment::updateOrCreate(
                     [
                         'user_id' => $transaction->user_id,
@@ -108,6 +109,33 @@ class MidtransCallbackController extends Controller
                 );
 
                 Log::info("Midtrans Callback: Enrollment berhasil diaktifkan untuk Order ID: {$orderId}");
+            }
+
+            if ($newStatus === 'success' && $transaction->plan_id) {
+                $plan = $transaction->plan;
+
+                $programIds = $plan->program_slot_count
+                    ? ($transaction->selected_program_ids ?? [])
+                    : [$plan->program_id];
+
+                $subscription = Subscription::updateOrCreate(
+                    [
+                        'user_id' => $transaction->user_id,
+                        'plan_id' => $transaction->plan_id,
+                    ],
+                    [
+                        'transaction_id' => $transaction->id,
+                        'status' => 'active',
+                        'start_date' => now(),
+                        'end_date' => $plan->duration_days
+                            ? now()->addDays($plan->duration_days)
+                            : null,
+                    ]
+                );
+
+                $subscription->programs()->sync($programIds);
+
+                Log::info("Midtrans Callback: Subscription berhasil diaktifkan untuk Order ID: {$orderId}");
             }
 
             if ($newStatus === 'refunded') {

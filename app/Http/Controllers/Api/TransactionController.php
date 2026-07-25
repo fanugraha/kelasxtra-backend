@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Enrollment;
 use App\Models\Package;
 use App\Models\Promo;
+use App\Models\SubscriptionPlan;
 use App\Models\Transaction;
 use App\Services\MidtransService;
 use Illuminate\Http\Request;
@@ -24,9 +25,16 @@ class TransactionController extends Controller
     public function checkout(Request $request)
     {
         $data = $request->validate([
-            'package_id' => ['required', 'integer', 'exists:packages,id'],
+            'package_id' => ['required_without:plan_id', 'nullable', 'integer', 'exists:packages,id'],
+            'plan_id' => ['required_without:package_id', 'nullable', 'integer', 'exists:subscription_plans,id'],
             'promo_code' => ['nullable', 'string'],
+            'program_ids' => ['nullable', 'array'],
+            'program_ids.*' => ['integer', 'exists:programs,id'],
         ]);
+
+        if (! empty($data['plan_id'])) {
+            return $this->checkoutSubscription($data, $request->user());
+        }
 
         $package = Package::findOrFail($data['package_id']);
         $user = $request->user();
@@ -129,5 +137,76 @@ class TransactionController extends Controller
             'id' => $transaction->id,
             'snap_token' => $this->midtrans->resumeTransaction($transaction),
         ]);
+    }
+
+    protected function checkoutSubscription(array $data, $user)
+    {
+        $plan = SubscriptionPlan::findOrFail($data['plan_id']);
+
+        $result = DB::transaction(function () use ($data, $plan, $user) {
+            $existingPending = Transaction::where('user_id', $user->id)
+                ->where('plan_id', $plan->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->latest()
+                ->first();
+
+            if ($existingPending) {
+                return [
+                    'transaction' => $existingPending,
+                    'snap_token' => $this->midtrans->resumeTransaction($existingPending),
+                    'is_new' => false,
+                ];
+            }
+
+            if ($plan->program_slot_count) {
+                $programIds = $data['program_ids'] ?? [];
+
+                if (count($programIds) !== $plan->program_slot_count) {
+                    abort(422, "Plan ini butuh tepat {$plan->program_slot_count} program dipilih.");
+                }
+            } else {
+                if (blank($plan->program_id)) {
+                    abort(500, 'Plan tidak valid: tidak fix ke program manapun dan tidak punya slot count.');
+                }
+
+                $programIds = [$plan->program_id];
+            }
+
+            $alreadyCovered = $user->subscriptions()->active()->get()
+                ->contains(fn ($sub) => collect($programIds)->every(fn ($pid) => $sub->coversProgram($pid)));
+
+            if ($alreadyCovered) {
+                abort(422, 'Kamu sudah punya langganan aktif yang mencakup program ini.');
+            }
+
+            $promo = null;
+
+            if (! empty($data['promo_code'])) {
+                $promo = Promo::where('code', $data['promo_code'])->lockForUpdate()->first();
+
+                if (! $promo) {
+                    abort(404, 'Kode promo tidak ditemukan.');
+                }
+
+                $error = $promo->checkUsableBy($user, $plan);
+                if ($error) {
+                    abort(422, $error);
+                }
+            }
+
+            $transaction = $this->midtrans->createSubscriptionTransaction($user, $plan, $programIds, $promo);
+
+            return [
+                'transaction' => $transaction,
+                'snap_token' => $transaction->snap_token,
+                'is_new' => true,
+            ];
+        });
+
+        $transaction = $result['transaction'];
+        $transaction->setAttribute('snap_token', $result['snap_token']);
+
+        return response()->json($transaction, $result['is_new'] ? 201 : 200);
     }
 }

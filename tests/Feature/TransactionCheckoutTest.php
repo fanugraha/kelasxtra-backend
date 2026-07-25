@@ -266,4 +266,160 @@ class TransactionCheckoutTest extends TestCase
             ->assertJsonPath('amount', '250000.00')
             ->assertJsonPath('discount_amount', '50000.00');
     }
+    protected function makePlan(array $overrides = []): \App\Models\SubscriptionPlan
+    {
+        $program = Program::factory()->create();
+
+        return \App\Models\SubscriptionPlan::factory()->create(array_merge([
+            'program_id' => $program->id,
+            'program_slot_count' => null,
+            'price' => 150000,
+            'duration_days' => 30,
+        ], $overrides));
+    }
+
+    /**
+     * Stub MidtransService::createSubscriptionTransaction() -- mirror
+     * mockMidtransCreatesTransaction() tapi untuk jalur plan_id.
+     */
+    protected function mockMidtransCreatesSubscriptionTransaction(): void
+    {
+        $this->mock(MidtransService::class, function ($mock) {
+            $mock->shouldReceive('createSubscriptionTransaction')
+                ->once()
+                ->andReturnUsing(function ($user, $plan, $programIds) {
+                    $transaction = Transaction::create([
+                        'user_id' => $user->id,
+                        'plan_id' => $plan->id,
+                        'selected_program_ids' => $programIds,
+                        'midtrans_order_id' => 'TEST-SUB-'.uniqid(),
+                        'invoice_number' => 'INV-SUB-TEST-'.uniqid(),
+                        'amount' => $plan->price,
+                        'discount_amount' => 0,
+                        'payment_method' => null,
+                        'status' => 'pending',
+                        'expires_at' => now()->addHours(24),
+                    ]);
+
+                    $transaction->setAttribute('snap_token', 'mock-snap-token-sub-new');
+
+                    return $transaction;
+                });
+        });
+    }
+
+    public function test_checkout_subscription_berhasil_untuk_plan_fix_program(): void
+    {
+        $this->mockMidtransCreatesSubscriptionTransaction();
+
+        $plan = $this->makePlan();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/transactions/checkout', ['plan_id' => $plan->id]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('status', 'pending')
+            ->assertJsonPath('plan_id', $plan->id)
+            ->assertJsonPath('snap_token', 'mock-snap-token-sub-new');
+
+        $this->assertDatabaseHas('transactions', [
+            'user_id' => $user->id,
+            'plan_id' => $plan->id,
+            'status' => 'pending',
+        ]);
+    }
+
+    public function test_checkout_subscription_berhasil_untuk_plan_multi_program_dengan_program_ids_lengkap(): void
+    {
+        $this->mockMidtransCreatesSubscriptionTransaction();
+
+        $programA = Program::factory()->create();
+        $programB = Program::factory()->create();
+        $plan = \App\Models\SubscriptionPlan::factory()->multiProgram(2)->create();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/transactions/checkout', [
+            'plan_id' => $plan->id,
+            'program_ids' => [$programA->id, $programB->id],
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('plan_id', $plan->id);
+    }
+
+    public function test_checkout_subscription_ditolak_kalau_jumlah_program_ids_tidak_sesuai_slot_count(): void
+    {
+        $programA = Program::factory()->create();
+        $plan = \App\Models\SubscriptionPlan::factory()->multiProgram(2)->create();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        // Cuma kirim 1 program_id padahal plan butuh 2.
+        $response = $this->postJson('/api/transactions/checkout', [
+            'plan_id' => $plan->id,
+            'program_ids' => [$programA->id],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('message', 'Plan ini butuh tepat 2 program dipilih.');
+    }
+
+    public function test_checkout_subscription_ditolak_kalau_sudah_punya_subscription_aktif_yang_cover_program_sama(): void
+    {
+        $program = Program::factory()->create();
+        $plan = $this->makePlan(['program_id' => $program->id]);
+        $user = User::factory()->create();
+
+        $existingPlan = $this->makePlan(['program_id' => $program->id]);
+        $subscription = \App\Models\Subscription::factory()->create([
+            'user_id' => $user->id,
+            'plan_id' => $existingPlan->id,
+            'status' => 'active',
+        ]);
+        $subscription->programs()->sync([$program->id]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/transactions/checkout', ['plan_id' => $plan->id]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('message', 'Kamu sudah punya langganan aktif yang mencakup program ini.');
+    }
+
+    public function test_checkout_subscription_resume_transaksi_pending_yang_sudah_ada(): void
+    {
+        $plan = $this->makePlan();
+        $user = User::factory()->create();
+
+        $existing = Transaction::create([
+            'user_id' => $user->id,
+            'plan_id' => $plan->id,
+            'selected_program_ids' => [$plan->program_id],
+            'midtrans_order_id' => 'KX-OLD-SUB-ORDER',
+            'invoice_number' => 'INV-OLD-SUB-0001',
+            'amount' => 150000,
+            'discount_amount' => 0,
+            'payment_method' => null,
+            'status' => 'pending',
+            'expires_at' => now()->addHours(24),
+        ]);
+
+        $this->mock(MidtransService::class, function ($mock) {
+            $mock->shouldReceive('resumeTransaction')->once()->andReturn('mock-snap-token-sub-resumed');
+            $mock->shouldNotReceive('createSubscriptionTransaction');
+        });
+
+        Sanctum::actingAs($user);
+
+        $response = $this->postJson('/api/transactions/checkout', ['plan_id' => $plan->id]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('id', $existing->id)
+            ->assertJsonPath('snap_token', 'mock-snap-token-sub-resumed');
+
+        $this->assertDatabaseCount('transactions', 1);
+    }
+
 }

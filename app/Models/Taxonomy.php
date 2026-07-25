@@ -35,6 +35,13 @@ class Taxonomy extends Model
         return $this->hasMany(QuestionBank::class);
     }
 
+    // Ditambahkan: dipakai TopicPracticeController buat nampilin daftar Topik
+    // (dan Part latihannya) per Kategori/Mapel di halaman Latihan Soal.
+    public function topics(): HasMany
+    {
+        return $this->hasMany(Topic::class);
+    }
+
     public function scopeCategories(Builder $query): Builder
     {
         return $query->where('type', 'category');

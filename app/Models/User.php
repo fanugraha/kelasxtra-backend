@@ -60,6 +60,11 @@ class User extends Authenticatable implements \Illuminate\Contracts\Auth\MustVer
         return $this->hasMany(Enrollment::class);
     }
 
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class);
+    }
+
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);

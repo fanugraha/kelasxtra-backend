@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Package;
 use App\Models\Promo;
+use App\Models\SubscriptionPlan;
 use Illuminate\Http\Request;
 
 class PromoController extends Controller
@@ -40,7 +41,8 @@ class PromoController extends Controller
     {
         $data = $request->validate([
             'code' => ['required', 'string'],
-            'package_id' => ['required', 'integer', 'exists:packages,id'],
+            'package_id' => ['required_without:plan_id', 'nullable', 'integer', 'exists:packages,id'],
+            'plan_id' => ['required_without:package_id', 'nullable', 'integer', 'exists:subscription_plans,id'],
         ]);
 
         $promo = Promo::where('code', $data['code'])->first();
@@ -49,20 +51,28 @@ class PromoController extends Controller
             return response()->json(['message' => 'Kode promo tidak ditemukan.'], 404);
         }
 
-        $package = Package::findOrFail($data['package_id']);
+        // item bisa Package (jalur beli paket) atau SubscriptionPlan (jalur
+        // langganan) -- checkUsableBy() dan calculateDiscount() di model
+        // Promo sudah digeneralisasi untuk terima keduanya (union type).
+        $item = ! empty($data['plan_id'])
+            ? SubscriptionPlan::findOrFail($data['plan_id'])
+            : Package::findOrFail($data['package_id']);
+
         $user = $request->user();
 
         // Pakai aturan yang sama dengan TransactionController::checkout(),
         // supaya kode yang lolos di sini pasti juga lolos pas checkout
         // beneran (termasuk new_user_only, usage_limit_per_user, total_quota,
         // dan applicable_package_id — sebelumnya cuma valid_until yang dicek).
-        $error = $promo->checkUsableBy($user, $package);
+        $error = $promo->checkUsableBy($user, $item);
         if ($error) {
             return response()->json(['message' => $error], 422);
         }
 
-        $basePrice = (float) ($package->discount_price ?? $package->price);
-        $discountAmount = $promo->calculateDiscount($package);
+        $basePrice = $item instanceof Package
+            ? (float) ($item->discount_price ?? $item->price)
+            : (float) $item->price;
+        $discountAmount = $promo->calculateDiscount($item);
         $finalAmount = max($basePrice - $discountAmount, 0);
 
         return response()->json([
