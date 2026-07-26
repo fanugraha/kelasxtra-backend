@@ -15,10 +15,12 @@ class TopicPartGenerator
      *
      * CATATAN (26 Jul 2026): Part latihan topik TIDAK dijual satuan lewat
      * Package -- aksesnya HANYA lewat Subscription (Subscription->coversProgram()).
-     * Sebelumnya generator ini mewajibkan ada Package dengan is_focus_topic=true
-     * sebelum boleh generate Part -- itu aturan lama dari sebelum Subscription
-     * ada dan sudah tidak relevan, jadi semua logika pencarian/attach Package
-     * dihapus dari sini.
+     *
+     * CATATAN (26 Jul 2026, fix): Part latihan topik SELALU dibungkus jadi
+     * SATU section saja, TIDAK di-split per bank_id soal asalnya. bank_id
+     * cuma relevan untuk Exam try-out biasa (attach bank soal manual lewat
+     * admin); untuk latihan topik, identitas "part ini soal apa" sudah
+     * cukup diwakili oleh topic_id.
      */
     public function generateNextPart(Topic $topic, int $questionCount = 10, ?int $durationMinutes = null): Exam
     {
@@ -42,7 +44,6 @@ class TopicPartGenerator
             ->whereNotIn('id', $usedQuestionIds)
             ->inRandomOrder()
             ->limit($questionCount)
-            ->with('bank')
             ->get();
 
         $nextPart = (Exam::where('topic_id', $topic->id)->max('part_number') ?? 0) + 1;
@@ -53,45 +54,28 @@ class TopicPartGenerator
                 'title' => "{$topic->name} - Part {$nextPart}",
                 'topic_id' => $topic->id,
                 'part_number' => $nextPart,
-                // Kalau admin isi durasi manual, pakai itu. Kalau kosong,
-                // estimasi otomatis: 1 menit per soal, minimal 5 menit.
                 'duration_minutes' => $durationMinutes ?? max(5, $questionCount),
-                // Part 1 tiap topik otomatis gratis -- ini "sample rasa" funnel:
-                // siswa bisa coba kualitas soal tanpa subscribe dulu. Part 2
-                // dst butuh Subscription aktif (lihat AccessControlService).
                 'is_free_preview' => $nextPart === 1,
             ]);
 
-            $questionsByBank = $questions->groupBy('bank_id');
+            $section = $exam->sections()->create([
+                'taxonomy_id' => $topic->taxonomy_id,
+                'question_bank_id' => null,
+                'code' => $topic->code,
+                'name' => $topic->name,
+                'scoring_type' => 'single_correct',
+            ]);
 
-            foreach ($questionsByBank as $bankId => $bankQuestions) {
-                $bank = $bankQuestions->first()->bank;
-
-                $section = $exam->sections()->create([
-                    'taxonomy_id' => $topic->taxonomy_id,
-                    'question_bank_id' => $bankId,
-                    // Kalau soal part ini nyebar di >1 Question Bank, code harus
-                    // dibedain per bank biar gak nabrak unique(exam_id, code).
-                    // Kalau cuma 1 bank, tetap pakai topic->code polos (kompatibel
-                    // dengan behavior lama).
-                    'code' => $questionsByBank->count() > 1
-                        ? "{$topic->code}-{$bankId}"
-                        : $topic->code,
-                    'name' => $topic->name,
-                    'scoring_type' => $bank->scoring_type,
+            foreach ($questions as $question) {
+                $exam->questions()->attach($question->id, [
+                    'exam_section_id' => $section->id,
                 ]);
 
-                foreach ($bankQuestions as $question) {
-                    $exam->questions()->attach($question->id, [
-                        'exam_section_id' => $section->id,
-                    ]);
-
-                    TopicUsedQuestion::create([
-                        'topic_id' => $topic->id,
-                        'question_id' => $question->id,
-                        'exam_id' => $exam->id,
-                    ]);
-                }
+                TopicUsedQuestion::create([
+                    'topic_id' => $topic->id,
+                    'question_id' => $question->id,
+                    'exam_id' => $exam->id,
+                ]);
             }
 
             return $exam;
