@@ -135,12 +135,29 @@ class ExamController extends Controller
                 ->with('options')
                 ->get();
 
+            // Susun soal PER SECTION dulu (urut sesuai kolom `order` di
+            // exam_sections, mis. TWK=1, TIU=2, TKP=3), shuffle HANYA di
+            // dalam masing-masing section -- supaya siswa selalu menyelesaikan
+            // 1 bagian dulu sebelum lanjut ke bagian berikutnya. Sebelumnya
+            // seluruh soal di-shuffle rata dalam 1 kocokan (bug: soal TKP bisa
+            // muncul di urutan awal, sebelum TWK/TIU selesai).
+            $sectionOrder = $exam->sections()->orderBy('order')->pluck('id');
+            $questionsBySection = $questions->groupBy(fn ($q) => $q->pivot->exam_section_id)->toBase();
+
+            $orderedQuestions = $sectionOrder
+                ->flatMap(fn ($sectionId) => ($questionsBySection->get($sectionId) ?? collect())->shuffle())
+                // Jaga-jaga: soal yang exam_section_id-nya tidak match section
+                // manapun di daftar urutan (data tidak konsisten) tetap
+                // disertakan di akhir, supaya tidak diam-diam hilang dari attempt.
+                ->concat($questionsBySection->except($sectionOrder->all())->flatten(1))
+                ->values();
+
             $questionOrder = [
-                'questions' => $questions->pluck('id')->shuffle()->values(),
+                'questions' => $orderedQuestions->pluck('id')->values(),
                 // Setiap elemen eksplisit menyertakan question_id, supaya tidak ambigu
                 // saat di-encode ke JSON (mapWithKeys sebelumnya rawan tertukar antara
                 // JSON object vs array tergantung urutan key).
-                'options' => $questions->map(function ($question) {
+                'options' => $orderedQuestions->map(function ($question) {
                     return [
                         'question_id' => $question->id,
                         'option_ids' => $question->options->pluck('id')->shuffle()->values(),
