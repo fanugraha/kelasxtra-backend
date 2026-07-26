@@ -105,7 +105,7 @@ class DevDemoDataSeeder extends Seeder
         $package = Package::create([
             'program_id' => $program->id,
             'name' => 'Paket Try Out SKD CPNS 2026',
-            'type' => 'reguler',
+            'type' => 'latihan_soal',
             'price' => 150000,
             'duration_days' => 90,
             'description' => 'Akses try out & pembahasan lengkap SKD CPNS 2026',

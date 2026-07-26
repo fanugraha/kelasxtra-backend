@@ -16,7 +16,7 @@ class PackageFactory extends Factory
             'program_id' => Program::factory(),
             'taxonomy_id' => null,
             'name' => $this->faker->words(3, true),
-            'type' => 'reguler',
+            'type' => 'latihan_soal',
             'price' => $this->faker->randomFloat(2, 50000, 500000),
             'discount_price' => null,
             'duration_days' => 30,

@@ -51,12 +51,17 @@ class PackageForm
                     ->helperText('Isi ini kalau paket berupa latihan/bimbel per-mapel (Matematika, Fisika, dll).'),
                 TextInput::make('name')
                     ->required(),
+                // 'reguler' sengaja dihapus dari daftar opsi (26 Jul 2026):
+                // Packages.jsx (katalog siswa) tidak pernah punya tab/filter
+                // untuk tipe ini, jadi paket bertipe 'reguler' tidak akan
+                // pernah bisa ditemukan/dibeli siswa lewat jalur normal.
+                // Sudah dicek ke production -- belum ada satupun Package
+                // dengan type='reguler', jadi aman dihapus tanpa migrasi data.
                 Select::make('type')
                     ->options([
                         'privat' => 'Privat',
                         'group' => 'Group',
                         'latihan_soal' => 'Latihan soal',
-                        'reguler' => 'Reguler',
                     ])
                     ->required()
                     ->live(),
