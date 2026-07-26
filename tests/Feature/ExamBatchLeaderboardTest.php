@@ -51,6 +51,24 @@ class ExamBatchLeaderboardTest extends TestCase
 
     // ── LeaderboardService::generateForBatch() ──────────────────────────
 
+    public function test_generate_untuk_2_batch_berbeda_tidak_saling_terkunci(): void
+    {
+        // Regression test untuk LeaderboardLock yang baru ditambahkan --
+        // lock-nya harus per-batch (pakai batch->id di key), bukan lock
+        // global yang bisa bikin 2 batch berbeda saling nunggu tanpa alasan.
+        $batchA = $this->makeBatch();
+        $batchB = $this->makeBatch();
+
+        $this->makeAttempt($batchA, User::factory()->create(), 90, 30);
+        $this->makeAttempt($batchB, User::factory()->create(), 80, 30);
+
+        app(LeaderboardService::class)->generateForBatch($batchA);
+        app(LeaderboardService::class)->generateForBatch($batchB);
+
+        $this->assertDatabaseHas('leaderboard_snapshots', ['exam_batch_id' => $batchA->id, 'score' => 90, 'rank' => 1]);
+        $this->assertDatabaseHas('leaderboard_snapshots', ['exam_batch_id' => $batchB->id, 'score' => 80, 'rank' => 1]);
+    }
+
     public function test_generate_mengurutkan_rank_berdasarkan_skor_tertinggi(): void
     {
         $batch = $this->makeBatch();

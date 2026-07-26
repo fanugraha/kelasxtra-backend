@@ -140,6 +140,73 @@ class TopicPartGeneratorTest extends TestCase
         $this->assertEquals(0, TopicUsedQuestion::where('topic_id', $topicB->id)->count());
     }
 
+    protected function makeSubjectTopic(string $name = 'Matematika', string $code = 'MTK'): Topic
+    {
+        // Taxonomy type=subject SENGAJA punya program_id null -- mapel
+        // bersifat global lintas Program, beda dengan type=category yang
+        // terikat ke satu Program lewat taxonomies.program_id.
+        $taxonomy = Taxonomy::create([
+            'program_id' => null,
+            'type' => 'subject',
+            'code' => $code,
+            'name' => $name,
+        ]);
+
+        return Topic::create([
+            'taxonomy_id' => $taxonomy->id,
+            'code' => $code,
+            'name' => $name,
+        ]);
+    }
+
+    protected function makeQuestionsForSubjectTopic(Topic $topic, int $count): void
+    {
+        // Bank soal untuk topic subject tetap butuh program_id (banknya
+        // milik satu Program tertentu), walau taxonomy-nya sendiri global.
+        $program = Program::factory()->create();
+
+        $bank = QuestionBank::factory()->create([
+            'program_id' => $program->id,
+            'taxonomy_id' => $topic->taxonomy_id,
+            'scoring_type' => 'single_correct',
+        ]);
+
+        Question::factory()->count($count)->create([
+            'bank_id' => $bank->id,
+            'topic_id' => $topic->id,
+        ]);
+    }
+
+    public function test_part_1_still_generates_for_subject_mode_topic(): void
+    {
+        // Part 1 selalu free preview, jadi tidak lewat pengecekan
+        // program_id -- guard subject-mode tidak boleh menghalangi ini.
+        $topic = $this->makeSubjectTopic();
+        $this->makeQuestionsForSubjectTopic($topic, 10);
+
+        $exam = app(TopicPartGenerator::class)->generateNextPart($topic, 10);
+
+        $this->assertEquals(1, $exam->part_number);
+        $this->assertTrue($exam->is_free_preview);
+        $this->assertNull($exam->program_id);
+    }
+
+    public function test_throws_when_generating_part_2_for_subject_mode_topic(): void
+    {
+        // Part 2+ butuh program_id buat cek subscription->coversProgram(),
+        // tapi taxonomy subject sengaja punya program_id null -- jadi harus
+        // gagal EKSPLISIT di titik generate, bukan silent 403 ke siswa nanti.
+        $topic = $this->makeSubjectTopic();
+        $this->makeQuestionsForSubjectTopic($topic, 20);
+
+        app(TopicPartGenerator::class)->generateNextPart($topic, 10);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('mode subject BELUM didukung');
+
+        app(TopicPartGenerator::class)->generateNextPart($topic, 10);
+    }
+
     public function test_throws_when_only_non_focus_package_exists_for_program(): void
     {
         // Regression test untuk bug yang baru diperbaiki: package biasa

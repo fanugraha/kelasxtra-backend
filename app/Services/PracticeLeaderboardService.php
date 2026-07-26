@@ -8,8 +8,8 @@ use App\Models\LeaderboardEvent;
 use App\Models\PracticeLeaderboard;
 use App\Models\Promo;
 use App\Notifications\PracticeLeaderboardRewardNotification;
+use App\Support\Leaderboard\LeaderboardLock;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -84,9 +84,7 @@ class PracticeLeaderboardService
         // submit exam yang sama nyaris bersamaan. Tanpa ini, dua proses bisa
         // saling baca "rank lama" yang sama sebelum salah satu selesai
         // menulis, dan hasil rank/event jadi tidak akurat.
-        $lock = Cache::lock("leaderboard:{$exam->id}:{$periode}", 30);
-
-        $lock->block(10, function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now) {
+        LeaderboardLock::run("leaderboard:practice:{$exam->id}:{$periode}", function () use ($exam, $periode, $bestAttempts, $rewardEligible, $now) {
             // Tangkap rank lama SEBELUM entri diproses -- dasar deteksi
             // perubahan rank (notifikasi rank-change).
             $oldRanks = PracticeLeaderboard::where('exam_id', $exam->id)

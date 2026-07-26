@@ -5,12 +5,25 @@ namespace App\Services;
 use App\Models\ExamBatch;
 use App\Models\LeaderboardSnapshot;
 use App\Models\ExamAttempt;
+use App\Support\Leaderboard\LeaderboardLock;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class LeaderboardService
 {
     public function generateForBatch(ExamBatch $batch): void
+    {
+        // Lock per batch -- pola sama seperti PracticeLeaderboardService,
+        // lewat LeaderboardLock bersama. Mencegah race condition kalau
+        // generateForBatch() untuk batch yang sama ke-trigger dobel nyaris
+        // bersamaan (mis. job terjadwal bentrok dengan admin klik
+        // "regenerate" manual di waktu yang sama).
+        LeaderboardLock::run("leaderboard:batch:{$batch->id}", function () use ($batch) {
+            $this->doGenerateForBatch($batch);
+        });
+    }
+
+    protected function doGenerateForBatch(ExamBatch $batch): void
     {
         // 1. Serahkan hitungan durasi dan tie-breaking ke Database Engine (Jauh lebih cepat & hemat RAM)
         $attempts = ExamAttempt::where('exam_batch_id', $batch->id)
