@@ -252,7 +252,7 @@ class AuthController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['nullable', 'string', 'max:20'],
-            'level_pendidikan' => ['nullable', 'string', 'max:50'],
+            'level_pendidikan' => ['nullable', 'string', 'in:sd,smp,sma,mahasiswa,umum'],
         ]);
 
         $user->update($data);
