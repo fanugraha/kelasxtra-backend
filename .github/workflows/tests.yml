@@ -1,0 +1,79 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: kelasxtra_testing
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, bcmath, pdo_mysql, intl, gd, zip
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Copy .env
+        run: cp .env.example .env
+
+      - name: Generate app key
+        run: php artisan key:generate
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h127.0.0.1 -uroot -proot --silent && break
+            sleep 2
+          done
+
+      - name: Point .env to CI database
+        run: |
+          php -r "
+            \$env = file_get_contents('.env');
+            \$env = preg_replace('/DB_CONNECTION=.*/', 'DB_CONNECTION=mysql', \$env);
+            \$env = preg_replace('/# ?DB_HOST=.*/', 'DB_HOST=127.0.0.1', \$env);
+            \$env = preg_replace('/# ?DB_PORT=.*/', 'DB_PORT=3306', \$env);
+            \$env = preg_replace('/# ?DB_DATABASE=.*/', 'DB_DATABASE=kelasxtra_testing', \$env);
+            \$env = preg_replace('/# ?DB_USERNAME=.*/', 'DB_USERNAME=root', \$env);
+            \$env = preg_replace('/# ?DB_PASSWORD=.*/', 'DB_PASSWORD=root', \$env);
+            file_put_contents('.env', \$env);
+          "
+
+      - name: Run migrations
+        run: php artisan migrate --force
+
+      - name: Run test suite
+        run: php artisan test --parallel
