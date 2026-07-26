@@ -5,12 +5,15 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\TopicResource\Pages;
 use App\Models\Program;
 use App\Models\Topic;
+use App\Services\TopicPartGenerator;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -149,7 +152,77 @@ class TopicResource extends Resource
                     ->action(fn ($livewire) => $livewire->resetTableFiltersForm()),
             ])
             ->recordActions([EditAction::make(), DeleteAction::make()])
-            ->toolbarActions([BulkActionGroup::make([DeleteBulkAction::make()])]);
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    DeleteBulkAction::make(),
+                    // Generate Part massal untuk beberapa Topic sekaligus.
+                    // Desain: skip-and-continue (topik dengan stok < jumlah
+                    // soal diminta tetap di-skip, bukan gagalin semua batch),
+                    // dan modal form ini sendiri jadi langkah konfirmasi
+                    // (klik "Generate" = submit, gak ada modal terpisah lagi).
+                    BulkAction::make("generatePartMassal")
+                        ->label("Generate Part Massal")
+                        ->icon("heroicon-o-bolt")
+                        ->schema([
+                            TextInput::make("jumlah_soal")
+                                ->label("Jumlah Soal per Part")
+                                ->numeric()
+                                ->default(10)
+                                ->minValue(10)
+                                ->required()
+                                ->helperText("Minimal 10 soal per Part."),
+                            TextInput::make("durasi_menit")
+                                ->label("Durasi (menit)")
+                                ->numeric()
+                                ->minValue(1)
+                                ->helperText("Kosongkan untuk otomatis (1 menit per soal, minimal 5 menit)."),
+                        ])
+                        ->modalHeading("Generate Part Massal")
+                        ->modalDescription(fn ($records) => "Akan generate Part berikutnya untuk {$records->count()} topik terpilih. Topik dengan stok soal kurang dari jumlah yang diminta akan dilewati.")
+                        ->modalSubmitActionLabel("Generate")
+                        ->action(function ($records, array $data, $livewire) {
+                            $questionCount = (int) $data["jumlah_soal"];
+                            $durationMinutes = filled($data["durasi_menit"] ?? null) ? (int) $data["durasi_menit"] : null;
+
+                            $success = [];
+                            $skipped = [];
+
+                            foreach ($records as $topic) {
+                                $category = $topic->taxonomy->name ?? "-";
+
+                                try {
+                                    $exam = app(TopicPartGenerator::class)
+                                        ->generateNextPart($topic, $questionCount, $durationMinutes);
+
+                                    $success[] = [
+                                        "topic" => $topic->name,
+                                        "category" => $category,
+                                        "part" => $exam->part_number,
+                                    ];
+                                } catch (\RuntimeException $e) {
+                                    $skipped[] = [
+                                        "topic" => $topic->name,
+                                        "category" => $category,
+                                        "reason" => $e->getMessage(),
+                                    ];
+                                }
+                            }
+
+                            $successJson = json_encode($success);
+                            $skippedJson = json_encode($skipped);
+
+                            $livewire->js(<<<JS
+                            setTimeout(() => {
+                                \$wire.mountAction('generatePartMassalResult', {
+                                    success: {$successJson},
+                                    skipped: {$skippedJson},
+                                });
+                            }, 300);
+                            JS);
+                        })
+                        ->deselectRecordsAfterCompletion(),
+                ]),
+            ]);
     }
 
     public static function getPages(): array

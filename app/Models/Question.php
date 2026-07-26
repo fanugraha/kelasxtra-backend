@@ -28,12 +28,12 @@ class Question extends Model
 
     public function pointCorrect(): int
     {
-        return $this->point_correct_override ?? $this->bank->point_correct;
+        return $this->point_correct_override ?? $this->bank->point_correct ?? 0;
     }
 
     public function pointWrong(): int
     {
-        return $this->point_wrong_override ?? $this->bank->point_wrong;
+        return $this->point_wrong_override ?? $this->bank->point_wrong ?? 0;
     }
     public function options(): HasMany
     {

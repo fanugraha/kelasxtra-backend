@@ -125,13 +125,19 @@ class SectionsRelationManager extends RelationManager
                                     return;
                                 }
 
-                                $bank = QuestionBank::with(['questions', 'taxonomy'])->find($state);
+                                $bank = QuestionBank::with(['questions.options', 'taxonomy'])->find($state);
 
                                 if (! $bank) {
                                     return;
                                 }
 
-                                $maxScore = $bank->questions->sum(fn (Question $question) => $question->pointCorrect());
+                                $isTkp = str_contains($bank->taxonomy?->name ?? '', 'Karakteristik Pribadi');
+                                $maxScore = $bank->questions->sum(function (Question $question) use ($isTkp) {
+                                    if ($isTkp) {
+                                        return $question->options->max('points') ?? 0;
+                                    }
+                                    return $question->pointCorrect();
+                                });
                                 $set('max_score', $maxScore);
 
                                 $passingGrade = $bank->taxonomy?->passing_grade;
