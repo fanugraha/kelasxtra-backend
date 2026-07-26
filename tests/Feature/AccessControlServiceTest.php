@@ -147,20 +147,6 @@ class AccessControlServiceTest extends TestCase
         $this->assertTrue($this->service->hasFullPerformanceAccess($user, $package->program_id));
     }
 
-    public function test_full_performance_access_granted_with_completed_enrollment(): void
-    {
-        $user = User::factory()->create();
-        $package = Package::factory()->create();
-
-        Enrollment::factory()->create([
-            'user_id' => $user->id,
-            'package_id' => $package->id,
-            'status' => 'completed',
-        ]);
-
-        $this->assertTrue($this->service->hasFullPerformanceAccess($user, $package->program_id));
-    }
-
     public function test_full_performance_access_denied_for_different_program(): void
     {
         $user = User::factory()->create();
@@ -177,8 +163,11 @@ class AccessControlServiceTest extends TestCase
         $this->assertFalse($this->service->hasFullPerformanceAccess($user, $otherProgramId));
     }
 
-    public function test_full_performance_access_denied_with_expired_enrollment(): void
+    public function test_full_performance_access_granted_with_expired_enrollment(): void
     {
+        // Keputusan bisnis: paket yang sudah habis masa berlaku (expired)
+        // tetap dapat akses breakdown performa selamanya -- lihat komentar
+        // hasFullPerformanceAccess() untuk alasannya.
         $user = User::factory()->create();
         $package = Package::factory()->create();
 
@@ -188,7 +177,7 @@ class AccessControlServiceTest extends TestCase
             'status' => 'expired',
         ]);
 
-        $this->assertFalse($this->service->hasFullPerformanceAccess($user, $package->program_id));
+        $this->assertTrue($this->service->hasFullPerformanceAccess($user, $package->program_id));
     }
 
     // ---------- canAccessClass ----------

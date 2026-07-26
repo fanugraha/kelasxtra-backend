@@ -30,9 +30,17 @@ class AccessControlService
     }
 
     /**
-     * Akses untuk Exam SATUAN (dijual lewat Package/Enrollment biasa).
-     * Exam Part (topic_id terisi) TIDAK memakai method ini -- lihat
-     * canAccessExamPart() untuk aturannya sendiri.
+     * Akses dasar untuk sebuah Exam (baik Exam satuan biasa maupun Exam
+     * Part topik) -- Exam Part tetap harus lewat method ini dulu sebelum
+     * canAccessExamPart() menambahkan cek urutan Part di atasnya.
+     *
+     * Ada 2 jalur "dimiliki" yang berbeda:
+     *  - Lewat Package biasa (Enrollment aktif ke Package yang memuat
+     *    Exam ini) -- jalur pembelian satuan/reguler.
+     *  - Lewat Package Latihan Fokus (package.is_focus_topic = true yang
+     *    memuat Exam ini) -- jalur ini TIDAK dibuka lewat Enrollment,
+     *    melainkan lewat Subscription aktif yang meng-cover Program Exam
+     *    ini (Subscription::coversProgram()).
      */
     public function canAttemptExam(User $user, Exam $exam): bool
     {
@@ -44,20 +52,33 @@ class AccessControlService
             ->whereHas('package.exams', fn ($q) => $q->where('exams.id', $exam->id))
             ->exists();
 
-        return $hasEnrollmentAccess;
+        if ($hasEnrollmentAccess) {
+            return true;
+        }
+
+        $isFocusTopicExam = $exam->packages()->where('packages.is_focus_topic', true)->exists();
+
+        if (! $isFocusTopicExam) {
+            return false;
+        }
+
+        if (blank($exam->program_id)) {
+            return false;
+        }
+
+        return $user->subscriptions()->active()
+            ->get()
+            ->contains(fn ($subscription) => $subscription->coversProgram($exam->program_id));
     }
 
     /**
-     * Akses untuk Latihan Soal per Part/Topik -- ini katalog TERBUKA,
-     * bukan sesuatu yang "dimiliki" lewat Package/Enrollment:
-     *
-     *  - Part 1 tiap topik SELALU terbuka untuk siapa saja yang login
-     *    (is_free_preview = true, di-set otomatis oleh TopicPartGenerator).
-     *  - Part 2 dst butuh Subscription AKTIF yang meng-cover Program exam
-     *    ini (dicek langsung ke Program, bukan lewat kepemilikan Package).
-     *  - Tetap wajib urut: Part sebelumnya harus SUDAH SELESAI dulu, bukan
-     *    cuma "sudah dibuka". Part yang sudah selesai boleh diulang bebas
-     *    kapan saja (lewat canReattemptCompletedPart(), bukan lewat cek ini).
+     * Akses untuk Latihan Soal per Part/Topik. Aturan kepemilikan (Package
+     * biasa vs Package Latihan Fokus + Subscription) SAMA PERSIS dengan
+     * canAttemptExam() di atas -- yang membedakan Part dari Exam satuan
+     * cuma satu hal tambahan: harus urut, Part sebelumnya WAJIB sudah
+     * SELESAI dulu (bukan cuma "sudah dibuka"). Part yang sudah selesai
+     * boleh diulang bebas kapan saja (lewat canReattemptCompletedPart(),
+     * bukan lewat cek ini).
      */
     public function canAccessExamPart(User $user, Exam $exam): bool
     {
@@ -66,18 +87,8 @@ class AccessControlService
             return $this->canAttemptExam($user, $exam);
         }
 
-        if (! $exam->is_free_preview) {
-            if (blank($exam->program_id)) {
-                return false;
-            }
-
-            $hasSubscription = $user->subscriptions()->active()
-                ->get()
-                ->contains(fn ($subscription) => $subscription->coversProgram($exam->program_id));
-
-            if (! $hasSubscription) {
-                return false;
-            }
+        if (! $this->canAttemptExam($user, $exam)) {
+            return false;
         }
 
         return $this->previousPartCompleted($user, $exam);

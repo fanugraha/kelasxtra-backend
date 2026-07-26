@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Exam;
+use App\Models\Package;
 use App\Models\Question;
 use App\Models\Topic;
 use App\Models\TopicUsedQuestion;
@@ -70,13 +71,44 @@ class TopicPartGenerator
             );
         }
 
+        // GUARD (26 Jul 2026): Part yang dijual lewat jalur ini HANYA boleh
+        // nempel ke Package langganan Latihan Fokus (is_focus_topic=true),
+        // bukan ke Package reguler manapun -- akses siswa ke Part 2+ dicek
+        // AccessControlService lewat Subscription->coversProgram(), yang
+        // cuma berlaku kalau Exam ini memang dimuat oleh Package
+        // is_focus_topic=true. Kalau Program-nya belum punya Package
+        // Latihan Fokus sama sekali (baru punya Package reguler biasa),
+        // Part yang di-generate bakal jadi "yatim" -- tidak bisa diakses
+        // siapapun meski Subscription-nya aktif -- jadi lebih baik gagal
+        // eksplisit di sini daripada nanti bingung kenapa 403 terus.
+        //
+        // Untuk Topic mode subject (program_id null di Part 1), cek ini
+        // dilewati -- Part 1 selalu free preview jadi tidak butuh Package
+        // apapun untuk bisa diakses.
+        $focusPackage = null;
+
+        if (! blank($programId)) {
+            $focusPackage = Package::where('program_id', $programId)
+                ->where('is_focus_topic', true)
+                ->first();
+
+            if (! $focusPackage) {
+                throw new \RuntimeException(
+                    "Program milik topik \"{$topic->name}\" belum punya Package Latihan Fokus ".
+                    '(is_focus_topic=true). Buat dulu Package tersebut sebelum generate Part -- '.
+                    'kalau tidak, Part ini tidak akan bisa diakses siswa manapun meski '.
+                    'Subscription-nya aktif.'
+                );
+            }
+        }
+
         $questions = Question::where('topic_id', $topic->id)
             ->whereNotIn('id', $usedQuestionIds)
             ->inRandomOrder()
             ->limit($questionCount)
             ->get();
 
-        return DB::transaction(function () use ($topic, $questions, $nextPart, $questionCount, $programId, $durationMinutes) {
+        return DB::transaction(function () use ($topic, $questions, $nextPart, $questionCount, $programId, $durationMinutes, $focusPackage) {
             $exam = Exam::create([
                 'program_id' => $programId,
                 'title' => "{$topic->name} - Part {$nextPart}",
@@ -85,6 +117,10 @@ class TopicPartGenerator
                 'duration_minutes' => $durationMinutes ?? max(5, $questionCount),
                 'is_free_preview' => $nextPart === 1,
             ]);
+
+            if ($focusPackage) {
+                $focusPackage->exams()->attach($exam->id);
+            }
 
             $section = $exam->sections()->create([
                 'taxonomy_id' => $topic->taxonomy_id,
