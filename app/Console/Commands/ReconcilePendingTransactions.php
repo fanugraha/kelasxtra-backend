@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Transaction;
+use App\Services\TransactionAccessService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Midtrans\Config;
@@ -13,6 +14,11 @@ class ReconcilePendingTransactions extends Command
     protected $signature = 'transactions:reconcile';
 
     protected $description = 'Cek ulang status transaksi pending yang sudah lewat batas waktu ke Midtrans — jaga-jaga webhook gagal/telat terkirim';
+
+    public function __construct(protected TransactionAccessService $transactionAccess)
+    {
+        parent::__construct();
+    }
 
     public function handle(): int
     {
@@ -66,6 +72,17 @@ class ReconcilePendingTransactions extends Command
             'payment_method' => $payload['payment_type'] ?? $transaction->payment_method,
             'paid_at' => $newStatus === 'success' ? now() : $transaction->paid_at,
         ]);
+
+        // Transaction::booted() cuma mengubah status Enrollment/Subscription
+        // yang SUDAH ADA -- untuk pembelian pertama kali (baris baru), akses
+        // wajib diberikan eksplisit lewat TransactionAccessService di sini,
+        // sama seperti yang dilakukan MidtransCallbackController untuk
+        // webhook real-time. Tanpa ini, transaksi yang baru ke-granted lewat
+        // reconcile (bukan webhook) akan tercatat 'success' tapi siswanya
+        // tidak pernah benar-benar dapat akses ke paket/langganannya.
+        if ($newStatus === 'success') {
+            $this->transactionAccess->grantAccessOnSuccess($transaction->fresh());
+        }
 
         $this->info("Order {$transaction->midtrans_order_id} -> {$newStatus}");
     }

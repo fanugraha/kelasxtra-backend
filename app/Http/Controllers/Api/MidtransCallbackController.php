@@ -3,15 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Enrollment;
 use App\Models\Transaction;
-use App\Models\Subscription;
+use App\Services\TransactionAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class MidtransCallbackController extends Controller
 {
+    public function __construct(protected TransactionAccessService $transactionAccess)
+    {
+    }
+
     public function handleCallback(Request $request)
     {
         $payload = $request->all();
@@ -90,52 +93,14 @@ class MidtransCallbackController extends Controller
             ]);
 
             // Transaction::booted() otomatis mencabut/mengaktifkan enrollment
-            // berdasarkan perubahan status di atas (termasuk untuk 'refunded').
+            // berdasarkan perubahan status di atas (termasuk untuk 'refunded'),
+            // TAPI cuma untuk Enrollment/Subscription yang SUDAH ADA. Pemberian
+            // akses untuk pembelian PERTAMA KALI (baris baru) ditangani terpisah
+            // oleh TransactionAccessService -- lihat komentar di class itu.
+            if ($newStatus === 'success') {
+                $this->transactionAccess->grantAccessOnSuccess($transaction);
 
-            if ($newStatus === 'success' && $transaction->package_id) {
-                Enrollment::updateOrCreate(
-                    [
-                        'user_id' => $transaction->user_id,
-                        'package_id' => $transaction->package_id,
-                    ],
-                    [
-                        'transaction_id' => $transaction->id,
-                        'status' => 'active',
-                        'start_date' => now(),
-                        'end_date' => $transaction->package->duration_days
-                            ? now()->addDays($transaction->package->duration_days)
-                            : null,
-                    ]
-                );
-
-                Log::info("Midtrans Callback: Enrollment berhasil diaktifkan untuk Order ID: {$orderId}");
-            }
-
-            if ($newStatus === 'success' && $transaction->plan_id) {
-                $plan = $transaction->plan;
-
-                $programIds = $plan->program_slot_count
-                    ? ($transaction->selected_program_ids ?? [])
-                    : [$plan->program_id];
-
-                $subscription = Subscription::updateOrCreate(
-                    [
-                        'user_id' => $transaction->user_id,
-                        'plan_id' => $transaction->plan_id,
-                    ],
-                    [
-                        'transaction_id' => $transaction->id,
-                        'status' => 'active',
-                        'start_date' => now(),
-                        'end_date' => $plan->duration_days
-                            ? now()->addDays($plan->duration_days)
-                            : null,
-                    ]
-                );
-
-                $subscription->programs()->sync($programIds);
-
-                Log::info("Midtrans Callback: Subscription berhasil diaktifkan untuk Order ID: {$orderId}");
+                Log::info("Midtrans Callback: akses berhasil diberikan untuk Order ID: {$orderId}");
             }
 
             if ($newStatus === 'refunded') {

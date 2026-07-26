@@ -17,11 +17,16 @@ use Illuminate\Support\Facades\DB;
  * recalculateScore() versi lama selalu ambil poin dari
  * question_options.points untuk semua soal pg. Itu benar untuk section
  * weighted_options (TKP), tapi SALAH untuk section single_correct (TWK/TIU)
- * -- soal jenis itu poinnya disimpan di pivot exam_questions.points, bukan
- * di opsi. Akibatnya: begitu tutor menilai 1 soal essay pada attempt yang
- * JUGA berisi jawaban TWK/TIU, recalculateScore() ke-trigger dan menghitung
- * ulang skor TWK/TIU pakai poin opsi (biasanya kosong/0) -- skor TWK/TIU
- * siswa hilang/berubah jadi 0 secara diam-diam.
+ * -- soal jenis itu poinnya (saat itu) disimpan di pivot
+ * exam_questions.points, bukan di opsi. Akibatnya: begitu tutor menilai 1
+ * soal essay pada attempt yang JUGA berisi jawaban TWK/TIU,
+ * recalculateScore() ke-trigger dan menghitung ulang skor TWK/TIU pakai
+ * poin opsi (biasanya kosong/0) -- skor TWK/TIU siswa hilang/berubah jadi 0
+ * secara diam-diam.
+ *
+ * CATATAN: kolom exam_questions.points yang disebut di atas sudah DIHAPUS
+ * dari skema (lihat migration drop_points_from_exam_questions_table).
+ * Sumber poin single_correct sekarang murni dari Question::pointCorrect().
  */
 class ExamScoringService
 {
@@ -38,7 +43,7 @@ class ExamScoringService
     {
         return DB::transaction(function () use ($attempt) {
             $answers = $attempt->answers()->with('question.options')->get();
-            $examQuestions = $attempt->exam->questions; // pivot: points, exam_section_id
+            $examQuestions = $attempt->exam->questions; // pivot: exam_section_id
             $sections = $attempt->exam->sections->keyBy('id');
 
             $score = 0;
@@ -83,10 +88,11 @@ class ExamScoringService
                 // - weighted_options (TKP): tiap opsi punya points sendiri (1-5),
                 //   tidak ada "salah" -- selectedOption->points dipakai langsung.
                 // - single_correct (TWK/TIU, default): opsi benar dicek via
-                //   is_correct, poin diambil dari bobot soal di pivot
-                //   exam_questions (BUKAN dari opsi), fallback 1 poin kalau
-                //   dari Question::pointCorrect() (override per-soal, fallback ke
-                //   default bank soal).
+                //   is_correct, poin diambil dari Question::pointCorrect()
+                //   (override per-soal, fallback ke default point_correct bank
+                //   soal). Kolom exam_questions.points versi lama sudah dihapus
+                //   dari skema -- pivot exam_questions sekarang cuma menyimpan
+                //   exam_section_id (lihat $examQuestions di bawah).
                 $selectedOption = $answer->question->options->firstWhere('id', $answer->selected_option_id);
                 $scoringType = $sections->get($sectionId)?->scoring_type;
 

@@ -131,9 +131,13 @@ class SectionsRelationManager extends RelationManager
                                     return;
                                 }
 
-                                $isTkp = str_contains($bank->taxonomy?->name ?? '', 'Karakteristik Pribadi');
-                                $maxScore = $bank->questions->sum(function (Question $question) use ($isTkp) {
-                                    if ($isTkp) {
+                                // Pakai scoring_type milik bank sebagai sumber kebenaran
+                                // (BUKAN pencocokan nama taxonomy) -- nama kategori bisa
+                                // berubah/beda-beda, tapi scoring_type selalu konsisten
+                                // dengan cara section ini nanti dinilai di ExamScoringService.
+                                $isWeightedOptions = $bank->scoring_type === 'weighted_options';
+                                $maxScore = $bank->questions->sum(function (Question $question) use ($isWeightedOptions) {
+                                    if ($isWeightedOptions) {
                                         return $question->options->max('points') ?? 0;
                                     }
                                     return $question->pointCorrect();
