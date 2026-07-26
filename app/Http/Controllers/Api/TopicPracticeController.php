@@ -107,7 +107,7 @@ class TopicPracticeController extends Controller
                 $status = 'completed';
             } elseif ($this->accessControl->canAccessExamPart($user, $exam)) {
                 $status = 'unlocked';
-            } elseif (! $exam->is_free_preview && blank($this->subscriptionCovering($user, $exam))) {
+            } elseif (! $exam->is_free_preview && ! $this->accessControl->canAttemptExam($user, $exam)) {
                 $status = 'locked_subscription';
             } else {
                 $status = 'locked_sequence';
@@ -123,16 +123,5 @@ class TopicPracticeController extends Controller
                 'duration_minutes' => $exam->duration_minutes,
             ];
         })->values();
-    }
-
-    protected function subscriptionCovering($user, Exam $exam)
-    {
-        if (blank($exam->program_id)) {
-            return null;
-        }
-
-        return $user->subscriptions()->active()
-            ->get()
-            ->first(fn ($subscription) => $subscription->coversProgram($exam->program_id));
     }
 }
