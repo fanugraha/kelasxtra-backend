@@ -28,11 +28,15 @@ class StartExamRequest extends FormRequest
 
     /**
      * Validasi tambahan:
-     * - Kalau exam ini punya section ber-bank (try-out multi-bank), bank_id
-     *   WAJIB diisi dan harus salah satu bank yang benar-benar nempel ke exam ini.
-     * - Kalau exam ini tidak punya section ber-bank sama sekali (Part Latihan
-     *   Topik -- semua section-nya question_bank_id NULL), bank_id diabaikan
-     *   total, tidak divalidasi apapun.
+     * - Default sekarang: bank_id KOSONG selalu valid, apa pun jumlah bank
+     *   yang nempel ke exam ini -- artinya siswa mengerjakan gabungan semua
+     *   bank sekaligus (mis. TO SKD = TWK+TIU+TKP jadi 1 attempt). Ini bukan
+     *   lagi kasus khusus Part Latihan Topik saja, tapi perilaku standar
+     *   untuk SEMUA exam (lihat diskusi soal "gabung vs pecah").
+     * - Kalau bank_id justru DIISI (mis. lewat ?bank= di URL, jalur mode
+     *   split yang belum dipakai lagi tapi tetap didukung), dia harus salah
+     *   satu bank yang benar-benar nempel ke exam ini -- supaya tidak bisa
+     *   attempt pakai bank yang tidak terkait exam tersebut.
      */
     public function withValidator(Validator $validator): void
     {
@@ -40,7 +44,8 @@ class StartExamRequest extends FormRequest
             $examId = $this->input('exam_id');
             $bankId = $this->input('bank_id');
 
-            if (!$examId) {
+            if (!$examId || !$bankId) {
+                // bank_id kosong: selalu valid, tidak perlu dicek lebih lanjut.
                 return;
             }
 
@@ -50,19 +55,6 @@ class StartExamRequest extends FormRequest
                 ->whereNotNull('exam_sections.question_bank_id')
                 ->distinct()
                 ->pluck('exam_sections.question_bank_id');
-
-            if ($bankIds->isEmpty()) {
-                // Part Latihan Topik / single-pool: bank_id tidak relevan.
-                return;
-            }
-
-            if (!$bankId) {
-                $validator->errors()->add(
-                    'bank_id',
-                    'Exam ini punya beberapa bank soal, silakan pilih salah satu.'
-                );
-                return;
-            }
 
             if (!$bankIds->contains((int) $bankId)) {
                 $validator->errors()->add(

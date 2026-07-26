@@ -331,11 +331,17 @@ public function forPackage(Request $request, \App\Models\Package $package)
         return $exams
             ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
             ->values()
-            ->flatMap(function (Exam $exam) use ($bankInfo, $user) {
-                $banks = $bankInfo[$exam->id]['banks'] ?? [];
-
-                // Exam lama / data belum rapi yang belum punya bank jelas --
-                // tetap tampil sebagai 1 card biasa, jangan hilang dari daftar.
+            // SATU card per exam, apa pun jumlah bank soal di dalamnya. Exam
+            // yang punya banyak bank (mis. TO SKD 2026 - Part 10 berisi
+            // TWK+TIU+TKP) TETAP tampil sebagai 1 card -- siswa mengerjakan
+            // semua bank sekaligus dalam 1 attempt (bank_id null di URL,
+            // lihat ExamDetail.jsx & ExamController::start()), dapat 1 nilai
+            // gabungan. Ini beda dari perilaku lama yang memecah per bank
+            // (Part 10 jadi 3 card: TWK/TIU/TKP terpisah) -- pemecahan itu
+            // hanya cocok kalau memang ada kebutuhan jual per-kategori, yang
+            // sekarang caranya adalah bikin exam terpisah berisi 1 bank saja,
+            // bukan memecah exam yang sama.
+            ->map(function (Exam $exam) use ($user) {
                 // Latihan Fokus: exam ini bagian dari rangkaian part per topik.
                 // is_locked dihitung terpisah dari filter akses paket di atas --
                 // exam TETAP muncul di daftar meski part sebelumnya belum selesai,
@@ -343,34 +349,17 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 // tapi frontend perlu tahu part mana yang masih terkunci.
                 $isLocked = !$this->accessControl->canAccessExamPart($user, $exam);
 
-                if (empty($banks)) {
-                    return collect([[
-                        'exam_id' => $exam->id,
-                        'bank_id' => null,
-                        'title' => $exam->title,
-                        'duration_minutes' => $exam->duration_minutes,
-                        'passing_score' => $exam->passing_score,
-                        'questions_count' => $exam->questions_count,
-                        'is_free_preview' => $exam->is_free_preview,
-                        'part_number' => $exam->part_number,
-                        'is_locked' => $isLocked,
-                    ]]);
-                }
-
-                // Satu card per bank/part (mis. Part 10, 11, 12, 13), supaya siswa
-                // langsung lihat semua part yang tersedia di package ini -- bukan
-                // 1 card gabungan yang menyembunyikan pilihan bank di balik modal.
-                return collect($banks)->map(fn ($bank) => [
+                return [
                     'exam_id' => $exam->id,
-                    'bank_id' => $bank['id'],
-                    'title' => $bank['title'],
+                    'bank_id' => null,
+                    'title' => $exam->title,
                     'duration_minutes' => $exam->duration_minutes,
                     'passing_score' => $exam->passing_score,
-                    'questions_count' => $bank['questions_count'] ?? 0,
+                    'questions_count' => $exam->questions_count,
                     'is_free_preview' => $exam->is_free_preview,
                     'part_number' => $exam->part_number,
                     'is_locked' => $isLocked,
-                ]);
+                ];
             })
             ->values();
     }
