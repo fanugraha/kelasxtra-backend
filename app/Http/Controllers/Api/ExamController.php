@@ -107,7 +107,14 @@ class ExamController extends Controller
         $existing = ExamAttempt::where('user_id', $user->id)
             ->where('exam_id', $exam->id)
             ->where('exam_batch_id', $batch?->id)
-            ->where('bank_id', $bankId)
+            // bank_id bisa NULL untuk Part Latihan Topik -- where('bank_id', null)
+            // di Laravel/SQL TIDAK match baris ber-bank_id NULL (jadi selalu false),
+            // makanya perlu whereNull eksplisit untuk kasus itu.
+            ->when(
+                $bankId,
+                fn ($q) => $q->where('bank_id', $bankId),
+                fn ($q) => $q->whereNull('bank_id')
+            )
             ->where('status', 'in_progress')
             ->first();
 
@@ -119,8 +126,12 @@ class ExamController extends Controller
             // Soal difilter ke bank yang dipilih siswa saja -- 1 attempt = 1 bank,
             // supaya nilai & jumlah soal (TWK/TIU/TKP) sesuai isi bank itu sendiri,
             // bukan gabungan semua bank yang nempel ke exam ini.
+            // bank_id null berarti Part Latihan Topik / exam single-pool --
+            // soal-soalnya TIDAK difilter per bank asal, ambil semua soal yang
+            // nempel ke exam ini apa adanya. bank_id terisi berarti try-out
+            // multi-bank -- filter cuma ke soal dari bank yang dipilih siswa.
             $questions = $exam->questions()
-                ->whereHas('bank', fn ($q) => $q->where('question_banks.id', $bankId))
+                ->when($bankId, fn ($q) => $q->whereHas('bank', fn ($qq) => $qq->where('question_banks.id', $bankId)))
                 ->with('options')
                 ->get();
 
