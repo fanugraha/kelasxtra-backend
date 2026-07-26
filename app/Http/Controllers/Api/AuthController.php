@@ -20,7 +20,7 @@ class AuthController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:20'],
-            'level_pendidikan' => ['nullable', 'string', 'max:50'],
+            'level_pendidikan' => ['nullable', 'string', 'in:sd,smp,sma,mahasiswa,umum'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
