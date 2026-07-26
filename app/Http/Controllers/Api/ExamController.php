@@ -189,11 +189,23 @@ class ExamController extends Controller
         $countsByExam = [];
 
         foreach ($exams as $exam) {
-            $counts = $exam->questions()
-                ->select('questions.bank_id')
+            // Basis penghitungan "bank" adalah exam_sections.question_bank_id,
+            // BUKAN questions.bank_id. Untuk Part Latihan Topik, soal sengaja
+            // diambil random lintas banyak Question Bank tapi semuanya
+            // dibungkus jadi SATU section (lihat TopicPartGenerator) --
+            // kalau basisnya bank asal soal individual, part seperti ini akan
+            // salah terbaca sebagai "multi-bank" padahal section-nya cuma 1.
+            // question_bank_id pada section NULL (kasus Part Latihan Topik)
+            // sengaja di-exclude (whereNotNull) supaya exam seperti itu selalu
+            // dianggap single-bank dan tidak memicu modal pilihan bank.
+            $counts = DB::table('exam_sections')
+                ->join('exam_questions', 'exam_questions.exam_section_id', '=', 'exam_sections.id')
+                ->where('exam_sections.exam_id', $exam->id)
+                ->whereNotNull('exam_sections.question_bank_id')
+                ->select('exam_sections.question_bank_id')
                 ->selectRaw('count(*) as cnt')
-                ->groupBy('questions.bank_id')
-                ->pluck('cnt', 'bank_id');
+                ->groupBy('exam_sections.question_bank_id')
+                ->pluck('cnt', 'question_bank_id');
 
             $bankIdsByExam[$exam->id] = $counts->keys()->filter()->values()->all();
             $countsByExam[$exam->id] = $counts;
