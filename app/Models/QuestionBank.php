@@ -26,6 +26,43 @@ class QuestionBank extends Model
             if (filled($bank->program_id) && blank($bank->taxonomy_id)) {
                 throw new \InvalidArgumentException('Question bank yang terikat Program harus punya taxonomy_id.');
             }
+
+            // scoring_type di-copy ke exam_sections.scoring_type saat attach
+            // (lihat Exam::attachBank()) -- section Latihan Topik yang tidak
+            // terikat bank (question_bank_id NULL) butuh kolom sendiri, jadi
+            // kolom ini TIDAK bisa dihapus/selalu-baca-dari-bank begitu saja.
+            //
+            // Tapi copy itu artinya bisa basi: ubah scoring_type di sini
+            // setelah section sudah attach, section-nya tidak otomatis ikut
+            // berubah kecuali kita sync manual (lihat static::saved() di
+            // bawah). Supaya perubahan itu tidak diam-diam mengubah cara
+            // attempt LAMA seharusnya sudah dinilai, kita pakai pola yang
+            // sama seperti Package::deleting() dan Exam::detachSection():
+            // blokir berdasarkan ada-tidaknya ExamAttemptSectionScore nyata,
+            // bukan berdasarkan ada-tidaknya relasi struktural ke section.
+            if ($bank->exists && $bank->isDirty('scoring_type')) {
+                $sectionIds = $bank->examSections()->pluck('id');
+
+                $hasGradedAttempts = ExamAttemptSectionScore::whereIn('exam_section_id', $sectionIds)->exists();
+
+                if ($hasGradedAttempts) {
+                    throw new \RuntimeException(
+                        "Bank Soal \"{$bank->title}\" (#{$bank->id}) tidak bisa diubah scoring_type-nya karena ".
+                        'sudah ada siswa yang mengerjakan dan mendapat nilai di section yang memakai bank ini. '.
+                        'Buat Bank Soal baru kalau perlu ubah cara penilaian.'
+                    );
+                }
+            }
+        });
+
+        // Belum ada attempt yang ter-grade (dijamin oleh guard di saving()
+        // di atas) -- aman sync scoring_type ke semua section yang sudah
+        // attach ke bank ini, supaya exam_sections.scoring_type tidak diam-
+        // diam basi dibanding bank sumbernya.
+        static::saved(function (self $bank) {
+            if ($bank->wasChanged('scoring_type')) {
+                $bank->examSections()->update(['scoring_type' => $bank->scoring_type]);
+            }
         });
     }
 
