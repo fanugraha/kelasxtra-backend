@@ -44,7 +44,11 @@ class ExamScoringService
         return DB::transaction(function () use ($attempt) {
             $answers = $attempt->answers()->with('question.options')->get();
             $examQuestions = $attempt->exam->questions; // pivot: exam_section_id
-            $sections = $attempt->exam->sections->keyBy('id');
+            // eager-load questionBank: ExamSection::scoring_type (P1.5) baca
+            // live dari bank sumbernya begitu question_bank_id terisi -- tanpa
+            // ini, tiap section attached-bank akan lazy-load 1 query terpisah
+            // di baris scoring_type di bawah.
+            $sections = $attempt->exam->sections()->with('questionBank')->get()->keyBy('id');
 
             $score = 0;
             $correctCount = 0;

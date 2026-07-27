@@ -1,5 +1,6 @@
 <?php
 namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 class ExamSection extends Model
 {
@@ -44,5 +45,28 @@ class ExamSection extends Model
     public function getTaxonomyNameAttribute(): ?string
     {
         return $this->taxonomy?->name;
+    }
+
+    /**
+     * Unifikasi P1.5: scoring_type dulu disimpan dobel (question_banks DAN
+     * exam_sections), dijaga sinkron lewat write-side hook di
+     * QuestionBank::booted(). Sekarang section dengan question_bank_id yang
+     * terisi TIDAK PERNAH baca kolomnya sendiri lagi -- selalu ambil live
+     * dari bank sumbernya, jadi tidak ada lagi kemungkinan dua nilai beda
+     * (tidak perlu ditulis-ulang, tidak bisa basi).
+     *
+     * Kolom exam_sections.scoring_type masih dipertahankan (NOT NULL di
+     * skema) karena section Latihan Topik (question_bank_id NULL, lihat
+     * TopicPartGenerator) tidak punya bank sumber sama sekali -- untuk
+     * section itu, kolom sendiri di sini TETAP jadi satu-satunya sumber
+     * kebenaran.
+     */
+    protected function scoringType(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value) => $this->question_bank_id
+                ? ($this->questionBank?->scoring_type ?? $value)
+                : $value,
+        );
     }
 }

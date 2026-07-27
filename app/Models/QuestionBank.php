@@ -27,19 +27,24 @@ class QuestionBank extends Model
                 throw new \InvalidArgumentException('Question bank yang terikat Program harus punya taxonomy_id.');
             }
 
-            // scoring_type di-copy ke exam_sections.scoring_type saat attach
-            // (lihat Exam::attachBank()) -- section Latihan Topik yang tidak
-            // terikat bank (question_bank_id NULL) butuh kolom sendiri, jadi
-            // kolom ini TIDAK bisa dihapus/selalu-baca-dari-bank begitu saja.
+            // P1.5: scoring_type dulu di-copy ke exam_sections.scoring_type
+            // saat attach (lihat Exam::attachBank()) dan dijaga sinkron lewat
+            // write-side hook di static::saved() -- itu sudah dihapus.
+            // ExamSection::scoringType() sekarang baca LIVE dari bank ini
+            // via accessor begitu section punya question_bank_id, jadi tidak
+            // ada lagi kolom kedua yang perlu ditulis ulang/bisa basi.
             //
-            // Tapi copy itu artinya bisa basi: ubah scoring_type di sini
-            // setelah section sudah attach, section-nya tidak otomatis ikut
-            // berubah kecuali kita sync manual (lihat static::saved() di
-            // bawah). Supaya perubahan itu tidak diam-diam mengubah cara
-            // attempt LAMA seharusnya sudah dinilai, kita pakai pola yang
-            // sama seperti Package::deleting() dan Exam::detachSection():
-            // blokir berdasarkan ada-tidaknya ExamAttemptSectionScore nyata,
-            // bukan berdasarkan ada-tidaknya relasi struktural ke section.
+            // Guard di bawah ini TETAP diperlukan meski bacaannya sudah
+            // live: begitu bank sudah dipakai untuk menilai sungguhan
+            // (ExamAttemptSectionScore ada), scoring_type-nya tidak boleh
+            // berubah lagi -- kalau dibiarkan, semua section yang attach ke
+            // bank ini (termasuk yang attempt-nya sudah lama selesai
+            // dinilai) akan langsung ikut berubah cara baca skornya di
+            // ExamScoringService begitu bank di-update, tanpa jejak apapun.
+            // Pola blokirnya sama seperti Package::deleting() dan
+            // Exam::detachSection(): berdasarkan ada-tidaknya
+            // ExamAttemptSectionScore nyata, bukan ada-tidaknya relasi
+            // struktural ke section.
             if ($bank->exists && $bank->isDirty('scoring_type')) {
                 $sectionIds = $bank->examSections()->pluck('id');
 
@@ -52,16 +57,6 @@ class QuestionBank extends Model
                         'Buat Bank Soal baru kalau perlu ubah cara penilaian.'
                     );
                 }
-            }
-        });
-
-        // Belum ada attempt yang ter-grade (dijamin oleh guard di saving()
-        // di atas) -- aman sync scoring_type ke semua section yang sudah
-        // attach ke bank ini, supaya exam_sections.scoring_type tidak diam-
-        // diam basi dibanding bank sumbernya.
-        static::saved(function (self $bank) {
-            if ($bank->wasChanged('scoring_type')) {
-                $bank->examSections()->update(['scoring_type' => $bank->scoring_type]);
             }
         });
     }
