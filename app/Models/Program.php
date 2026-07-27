@@ -40,6 +40,14 @@ class Program extends Model
         return $this->hasMany(QuestionBank::class);
     }
 
+    // P3 scaffolding: target belajar personal, hanya relevan kalau
+    // usesSubjectMode() true. Lihat App\Models\LearningGoal untuk detail
+    // keputusan produknya.
+    public function learningGoals(): HasMany
+    {
+        return $this->hasMany(LearningGoal::class);
+    }
+
     // Kategori Soal sekarang disimpan di tabel taxonomies (type='category'),
     // masih terikat ke Program ini lewat taxonomies.program_id.
     public function categories(): HasMany
