@@ -1030,6 +1030,16 @@ public function forPackage(Request $request, \App\Models\Package $package)
         if ($isPracticeExam && $attempt->fresh()->status === 'graded') {
             app(\App\Services\PracticeLeaderboardService::class)->generateForExam($attempt->exam);
         }
+
+        // Rollup topic_mastery_snapshots (P2 poin 7) di-refresh untuk SEMUA
+        // exam yang statusnya sudah final (bukan cuma exam latihan soal
+        // seperti leaderboard di atas) -- topicPerformance() sekarang
+        // dipakai lintas semua jenis attempt, jadi rollup-nya juga harus
+        // mengikuti cakupan yang sama. Dispatch lewat job (async) supaya
+        // request submit ujian ini tidak ikut menanggung biaya hitungnya.
+        if ($attempt->fresh()->status === 'graded') {
+            \App\Jobs\GenerateTopicMasterySnapshotJob::dispatch($attempt->fresh());
+        }
     }
 
     protected function authorizeOwnership(Request $request, ExamAttempt $attempt): void
