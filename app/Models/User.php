@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -26,6 +27,7 @@ class User extends Authenticatable implements \Illuminate\Contracts\Auth\MustVer
         'level_pendidikan',
         'is_active',
         'hide_from_leaderboard_feed',
+        'parent_id',
     ];
 
     protected $hidden = [
@@ -53,6 +55,28 @@ class User extends Authenticatable implements \Illuminate\Contracts\Auth\MustVer
     public function tutor(): HasOne
     {
         return $this->hasOne(Tutor::class);
+    }
+
+    // P3 scaffolding: 1 orang tua (role 'orang_tua') -> banyak anak.
+    // 1 anak cukup punya 1 orang tua, jadi FK biasa (bukan pivot).
+    // Belum ada endpoint yang memakai ini -- disiapkan untuk fitur
+    // dashboard multi-anak yang akan dikerjakan kemudian.
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'parent_id');
+    }
+
+    public function children(): HasMany
+    {
+        return $this->hasMany(User::class, 'parent_id');
+    }
+
+    // P3 scaffolding: target belajar, hanya relevan untuk program
+    // question_grouping_mode = 'subject' (brand Sekolah/SNBT). Guard-nya
+    // ada di service/controller, bukan di relasi ini.
+    public function learningGoals(): HasMany
+    {
+        return $this->hasMany(LearningGoal::class);
     }
 
     public function enrollments(): HasMany
