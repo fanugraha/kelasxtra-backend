@@ -116,6 +116,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/exam-attempts/{attempt}/review', [ExamController::class, 'review']);
     Route::get('/me/performance-summary', [PerformanceController::class, 'performanceSummary']);
     Route::get('/me/topic-performance', [ExamController::class, 'topicPerformance']);
+    Route::get('/me/topic-mastery-history', [PerformanceController::class, 'topicMasteryHistory']);
     Route::get('/packages/{package}/exams', [ExamController::class, 'forPackage']);
 
     // Leaderboard Try Out

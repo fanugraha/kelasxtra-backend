@@ -7,6 +7,7 @@ use App\Models\ExamAttempt;
 use App\Models\ExamAttemptTopicScore;
 use App\Models\Program;
 use App\Models\Topic;
+use App\Models\TopicMasterySnapshot;
 use App\Services\AccessControlService;
 use App\Services\RankingService;
 use App\Services\StreakService;
@@ -87,6 +88,86 @@ class PerformanceController extends Controller
                     'action_link' => "/app/packages?program_id={$programId}",
                 ],
             ],
+        ]);
+    }
+
+    /**
+     * GET /api/me/topic-mastery-history
+     *
+     * P2.7 (read path): riwayat mastery MINGGUAN per topik, dari rollup
+     * topic_mastery_snapshots (write path sudah ada sejak PR sebelumnya).
+     * SENGAJA endpoint terpisah dari topicPerformance()/performanceSummary()
+     * di atas, bukan nambahin field ke keduanya -- dua endpoint itu
+     * ngasih ranking topik (banyak topik x 1 angka), sementara ini ngasih
+     * time-series 1 topik (buat chart "naik dari 40% ke 65% dalam
+     * sebulan") -- bentuk datanya beda kelas, gabung bakal bikin payload
+     * ranking bengkak buat kasus yang cuma kepake pas user buka drill-down
+     * 1 topik.
+     *
+     * CATATAN SCOPE: cuma consumer siswa (dashboard sendiri). Dashboard
+     * orang tua & recommendation engine SENGAJA belum dibuatkan endpoint
+     * -- keduanya masih P3.8 (relasi ortu-anak, skema rekomendasi) yang
+     * granularitasnya belum diputuskan produk. TopicMasteryService sendiri
+     * (dipanggil method ini di bawah lewat query langsung ke model, bukan
+     * lewat service) sudah bisa dipanggil kode lain kapan saja tanpa
+     * perubahan apapun begitu consumer itu jelas kebutuhannya.
+     */
+    public function topicMasteryHistory(Request $request)
+    {
+        $request->validate([
+            'topic_id' => ['required', 'integer', 'exists:topics,id'],
+            'periods' => ['sometimes', 'integer', 'min:1', 'max:52'],
+        ]);
+
+        $user = $request->user();
+        $topic = Topic::with('taxonomy')->find($request->query('topic_id'));
+        $periodsLimit = (int) $request->query('periods', 12);
+
+        $programId = $topic->taxonomy?->program_id;
+
+        // Sama seperti performanceSummary(): akses penuh (Enrollment atau
+        // Subscription yang cover Program ini, lihat AccessControlService)
+        // wajib buat lihat riwayat, bukan cuma ringkasan terkini -- kalau
+        // tidak, hasil GRATIS di preview exam bisa dipakai buat intip
+        // riwayat lengkap tanpa pernah beli apapun.
+        $hasFullAccess = $programId
+            ? app(AccessControlService::class)->hasFullPerformanceAccess($user, $programId)
+            : false;
+
+        if (! $hasFullAccess) {
+            return response()->json([
+                'topic' => ['id' => $topic->id, 'code' => $topic->code, 'name' => $topic->name],
+                'periods' => [],
+                'access' => [
+                    'full' => false,
+                    'upgrade_cta' => [
+                        'message' => 'Buka riwayat performa lengkap dengan memiliki paket program ini',
+                        'action_link' => $programId ? "/app/packages?program_id={$programId}" : '/app/packages',
+                    ],
+                ],
+            ]);
+        }
+
+        $snapshots = TopicMasterySnapshot::where('user_id', $user->id)
+            ->where('topic_id', $topic->id)
+            ->orderByDesc('period')
+            ->limit($periodsLimit)
+            ->get()
+            ->sortBy('period') // urutan tampil: lama -> baru, pas buat sumbu-x chart
+            ->values()
+            ->map(fn (TopicMasterySnapshot $snapshot) => [
+                'period' => $snapshot->period,
+                'correct_count' => $snapshot->correct_count,
+                'total_count' => $snapshot->total_count,
+                'percentage' => $snapshot->percentage,
+                'trend' => $snapshot->trend,
+                'computed_at' => $snapshot->computed_at?->toIso8601String(),
+            ]);
+
+        return response()->json([
+            'topic' => ['id' => $topic->id, 'code' => $topic->code, 'name' => $topic->name],
+            'periods' => $snapshots,
+            'access' => ['full' => true, 'upgrade_cta' => null],
         ]);
     }
 
