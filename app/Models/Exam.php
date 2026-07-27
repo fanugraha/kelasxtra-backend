@@ -8,10 +8,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\ExamAttemptSectionScore;
+use Illuminate\Database\Eloquent\Builder;
 
 class Exam extends Model
 {
     use HasFactory;
+
+    public const CONTEXT_TRYOUT = 'tryout';
+    public const CONTEXT_TOPIC_PRACTICE = 'topic_practice';
 
     protected $fillable = [
         'program_id',
@@ -25,6 +29,7 @@ class Exam extends Model
         'focus_taxonomy_id',
         'topic_id',
         'part_number',
+        'context',
     ];
 
     protected function casts(): array
@@ -34,6 +39,28 @@ class Exam extends Model
             'require_all_sections_pass' => 'boolean',
             'uses_section_timers' => 'boolean',
         ];
+    }
+
+    /**
+     * context SELALU diturunkan otomatis dari topic_id, tidak pernah
+     * dipercaya dari input manual (admin, factory, service manapun).
+     * Ini sengaja bukan "kolom eksplisit yang bisa drift dari topic_id"
+     * -- kalau context bisa disetel bebas lalu boleh tidak sinkron
+     * dengan topic_id, kita cuma memindahkan bug lama (whereNull yang
+     * kelupaan di satu tempat) jadi bug baru (context yang kelupaan
+     * di-set/salah-set di satu tempat). Dengan disinkronkan paksa di
+     * sini, context tetap berguna sebagai satu kolom terindeks yang
+     * gampang di-query (menggantikan whereNull('topic_id') yang
+     * tersebar), tapi mustahil ke luar dari topic_id sebagai sumber
+     * kebenaran aslinya.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Exam $exam) {
+            $exam->context = filled($exam->topic_id)
+                ? self::CONTEXT_TOPIC_PRACTICE
+                : self::CONTEXT_TRYOUT;
+        });
     }
 
     public function program(): BelongsTo
@@ -49,6 +76,30 @@ class Exam extends Model
     public function topic(): BelongsTo
     {
         return $this->belongsTo(Topic::class);
+    }
+
+    /**
+     * Scope Tryout biasa -- ganti pola whereNull('topic_id') yang dulu
+     * tersebar di ExamController/ExamResource. Sumber kebenaran sekarang
+     * kolom context, bukan inferensi dari topic_id.
+     */
+    public function scopeTryout(Builder $query): Builder
+    {
+        return $query->where('context', self::CONTEXT_TRYOUT);
+    }
+
+    /**
+     * Scope Part Latihan Topik -- ganti pola whereNotNull('part_number')
+     * yang dulu tersebar di TopicPracticeController.
+     */
+    public function scopeTopicPractice(Builder $query): Builder
+    {
+        return $query->where('context', self::CONTEXT_TOPIC_PRACTICE);
+    }
+
+    public function isTopicPractice(): bool
+    {
+        return $this->context === self::CONTEXT_TOPIC_PRACTICE;
     }
 
     public function isFocusTopic(): bool

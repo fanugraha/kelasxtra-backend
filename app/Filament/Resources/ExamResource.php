@@ -189,7 +189,7 @@ class ExamResource extends Resource
                 // dimatikan kalau admin sesekali perlu lihat semuanya.
                 Filter::make('sembunyikan_part')
                     ->label('Sembunyikan Part Latihan (kelola di halaman Topics)')
-                    ->query(fn (Builder $query) => $query->whereNull('topic_id'))
+                    ->query(fn (Builder $query) => $query->tryout())
                     ->default(),
                 // Sinyal "exam ini belum siap dipakai" -- section-nya ada
                 // tapi belum ada satupun yang ke-attach ke Bank Soal, atau

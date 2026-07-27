@@ -24,7 +24,7 @@ class TopicPracticeController extends Controller
     public function categories(Request $request)
     {
         return Taxonomy::query()
-            ->whereHas('topics.exams', fn ($q) => $q->whereNotNull('part_number'))
+            ->whereHas('topics.exams', fn ($q) => $q->topicPractice())
             ->with('program')
             ->get()
             ->map(fn (Taxonomy $taxonomy) => [
@@ -49,12 +49,12 @@ class TopicPracticeController extends Controller
         $user = $request->user();
 
         $topics = Topic::where('taxonomy_id', $taxonomy->id)
-            ->whereHas('exams', fn ($q) => $q->whereNotNull('part_number'))
+            ->whereHas('exams', fn ($q) => $q->topicPractice())
             ->with('exams')
             ->get();
 
         return $topics->map(function (Topic $topic) use ($user) {
-            $parts = $topic->exams()->whereNotNull('part_number')->orderBy('part_number')->get();
+            $parts = $topic->exams()->topicPractice()->orderBy('part_number')->get();
             $examIds = $parts->pluck('id');
 
             $completedCount = ExamAttempt::where('user_id', $user->id)
@@ -88,7 +88,7 @@ class TopicPracticeController extends Controller
         $user = $request->user();
 
         $parts = $topic->exams()
-            ->whereNotNull('part_number')
+            ->topicPractice()
             ->orderBy('part_number')
             ->get();
 

@@ -114,6 +114,8 @@ class TopicPartGenerator
                 'title' => "{$topic->name} - Part {$nextPart}",
                 'topic_id' => $topic->id,
                 'part_number' => $nextPart,
+                // context tidak perlu diset manual di sini -- Exam::booted()
+                // mensinkronkannya otomatis dari topic_id saat disimpan.
                 'duration_minutes' => $durationMinutes ?? max(5, $questionCount),
                 'is_free_preview' => $nextPart === 1,
             ]);

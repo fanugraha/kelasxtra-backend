@@ -288,7 +288,7 @@ class ExamController extends Controller
             return response()->json(['exam_id' => $latestAttempt->exam_id]);
         }
 
-        $exams = Exam::whereNull('topic_id')->get(); // Exam Part exclude -- flow terpisah di TopicPracticeController
+        $exams = Exam::tryout()->get(); // Exam Part exclude -- flow terpisah di TopicPracticeController
 
         $fallback = $exams
             ->filter(fn (Exam $exam) => $this->accessControl->canAttemptExam($user, $exam))
@@ -307,7 +307,7 @@ class ExamController extends Controller
     {
         $user = $request->user();
 
-        $exams = Exam::withCount('questions')->whereNull('topic_id')->get(); // Exam Part punya flow lock tersendiri, jangan bocor ke sini
+        $exams = Exam::withCount('questions')->tryout()->get(); // Exam Part punya flow lock tersendiri, jangan bocor ke sini
 
         $bankInfo = $this->resolveAvailableBanks($exams);
 

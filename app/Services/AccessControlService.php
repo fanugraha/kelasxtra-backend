@@ -91,7 +91,7 @@ class AccessControlService
      */
     public function canAccessExamPart(User $user, Exam $exam): bool
     {
-        if (blank($exam->topic_id)) {
+        if (! $exam->isTopicPractice()) {
             // Bukan Part sama sekali -- pakai aturan Exam satuan biasa.
             return $this->canAttemptExam($user, $exam);
         }
