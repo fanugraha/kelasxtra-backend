@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Enrollment;
 use App\Models\Exam;
 use App\Models\Package;
 use App\Models\Program;
@@ -171,6 +172,31 @@ class AccessControlServiceSubscriptionTest extends TestCase
         $program = Program::factory()->create();
         $exam = $this->makeFocusTopicExam($program);
         $user = User::factory()->create();
+
+        $this->assertFalse($this->service->canAttemptExam($user, $exam));
+    }
+
+    public function test_focus_topic_exam_not_granted_by_enrollment_even_when_package_explicitly_links_it(): void
+    {
+        // Keputusan produk: exam focus-topic HANYA lewat Subscription, Enrollment
+        // tidak berlaku sama sekali untuk jenis exam ini -- meski (misal karena
+        // kesalahan admin) sebuah Package biasa ikut memuat exam ini via package_exam
+        // dan user punya Enrollment aktif ke Package itu, akses tetap ditolak.
+        $program = Program::factory()->create();
+        $exam = $this->makeFocusTopicExam($program);
+        $user = User::factory()->create();
+
+        $regularPackage = Package::factory()->create([
+            'program_id' => $program->id,
+            'is_focus_topic' => false,
+        ]);
+        $regularPackage->exams()->attach($exam->id);
+
+        Enrollment::factory()->create([
+            'user_id' => $user->id,
+            'package_id' => $regularPackage->id,
+            'status' => 'active',
+        ]);
 
         $this->assertFalse($this->service->canAttemptExam($user, $exam));
     }
