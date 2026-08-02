@@ -29,8 +29,15 @@ class PerformanceController extends Controller
         $programId = $request->query('program_id', $user->preferred_program_id);
         $attemptsLimit = (int) $request->query('attempts_limit', 5);
 
+        // context=tryout saja -- attempt dari exam Latihan Topik (context=
+        // topic_practice) TIDAK dihitung di sini. Kalau ikut kehitung, user
+        // yang cuma pernah latihan topik (belum pernah tryout resmi TWK/
+        // TIU/TKP) akan salah dianggap state='ready' padahal belum ada
+        // section resmi yang benar-benar dikerjakan. Lihat juga catatan
+        // yang sama di buildSections() di bawah -- root cause bug section
+        // duplikat yang ditemukan lewat audit mobile app.
         $totalAttempts = ExamAttempt::where('user_id', $user->id)
-            ->whereHas('exam', fn ($q) => $q->where('program_id', $programId))
+            ->whereHas('exam', fn ($q) => $q->where('program_id', $programId)->tryout())
             ->count();
 
         $streak = app(StreakService::class)->currentStreak($user, $programId);
@@ -173,8 +180,18 @@ class PerformanceController extends Controller
 
     protected function buildSections($user, int $programId, int $attemptsLimit): array
     {
+        // context=tryout saja -- lihat catatan di performanceSummary() soal
+        // $totalAttempts. Exam Latihan Topik (context=topic_practice) punya
+        // ExamSection sendiri yang di-generate TopicPartGenerator dengan
+        // taxonomy_id = topic.taxonomy_id (SAMA dengan taxonomy_id section
+        // resmi, mis. TWK) -- kalau attempt-nya ikut ditarik ke sini, jadi
+        // muncul "section" tambahan yang topics[]-nya identik/duplikat
+        // dengan section resmi (karena sumber topik query-nya sama:
+        // Topic::where('taxonomy_id', ...)). Ini juga bikin topik yang
+        // sama muncul 2x di top_recommendations (lihat buildTopRecommendations
+        // di bawah), kebuang slot rekomendasi buat duplikat topik yang sama.
         $recentAttemptIds = ExamAttempt::where('user_id', $user->id)
-            ->whereHas('exam', fn ($q) => $q->where('program_id', $programId))
+            ->whereHas('exam', fn ($q) => $q->where('program_id', $programId)->tryout())
             ->whereNotNull('finished_at')
             ->orderByDesc('finished_at')
             ->limit($attemptsLimit)

@@ -388,4 +388,93 @@ class PerformanceSummaryTest extends TestCase
         // Section score-nya sendiri harus dari attempt TERBARU (raw_score 75), bukan yang lama
         $this->assertSame(75, $response->json('sections.0.current_score'));
     }
+
+    public function test_attempt_dari_exam_latihan_topik_tidak_dihitung_sebagai_section_tersendiri(): void
+    {
+        ['program' => $program, 'taxonomy' => $taxonomy, 'exam' => $exam, 'section' => $section]
+            = $this->setupProgramWithExam();
+
+        $package = Package::factory()->create(['program_id' => $program->id]);
+        $user = User::factory()->create();
+
+        Enrollment::create([
+            'user_id' => $user->id,
+            'package_id' => $package->id,
+            'status' => 'active',
+            'start_date' => now()->subDay(),
+            'end_date' => now()->addDays(30),
+        ]);
+
+        $topicA = Topic::create(['taxonomy_id' => $taxonomy->id, 'code' => 'T1', 'name' => 'Pancasila']);
+        $topicB = Topic::create(['taxonomy_id' => $taxonomy->id, 'code' => 'T2', 'name' => 'UUD 1945']);
+
+        // Attempt tryout resmi -- topicA weak (20%)
+        $tryoutAttempt = $this->makeAttempt($user, $exam, 40);
+        ExamAttemptSectionScore::create([
+            'exam_attempt_id' => $tryoutAttempt->id,
+            'exam_section_id' => $section->id,
+            'raw_score' => 40,
+            'correct_count' => 8,
+            'passed_threshold' => false,
+        ]);
+        ExamAttemptTopicScore::create([
+            'exam_attempt_id' => $tryoutAttempt->id,
+            'topic_id' => $topicA->id,
+            'correct_count' => 2,
+            'total_count' => 10,
+        ]);
+
+        // Exam Latihan Topik untuk topicB, meniru TopicPartGenerator: exam
+        // punya topic_id (=> context otomatis jadi topic_practice lewat
+        // Exam::booted()), dan ExamSection-nya taxonomy_id SAMA dengan
+        // taxonomy TWK (persis pola bug yang ditemukan).
+        $topicPracticeExam = Exam::factory()->create([
+            'program_id' => $program->id,
+            'topic_id' => $topicB->id,
+            'part_number' => 1,
+        ]);
+        $this->assertSame('topic_practice', $topicPracticeExam->context);
+
+        $topicPracticeSection = ExamSection::create([
+            'exam_id' => $topicPracticeExam->id,
+            'taxonomy_id' => $topicB->taxonomy_id,
+            'code' => 'UUD 1945',
+            'name' => 'UUD 1945',
+            'scoring_type' => 'single_correct',
+        ]);
+
+        $practiceAttempt = $this->makeAttempt($user, $topicPracticeExam, 20);
+        ExamAttemptSectionScore::create([
+            'exam_attempt_id' => $practiceAttempt->id,
+            'exam_section_id' => $topicPracticeSection->id,
+            'raw_score' => 20,
+            'correct_count' => 2,
+            'passed_threshold' => false,
+        ]);
+        // topicB juga weak (20%) kalau ikut kehitung -- supaya kalau bug
+        // muncul lagi, topicA dan topicB akan sama-sama nongol 2x di
+        // top_recommendations (satu dari section asli, satu dari section
+        // palsu latihan topik yang taxonomy_id-nya sama).
+        ExamAttemptTopicScore::create([
+            'exam_attempt_id' => $practiceAttempt->id,
+            'topic_id' => $topicB->id,
+            'correct_count' => 2,
+            'total_count' => 10,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson("/api/me/performance-summary?program_id={$program->id}");
+
+        $response->assertOk();
+
+        // Cuma 1 section (TWK asli) -- attempt latihan topik tidak boleh
+        // bikin section "UUD 1945" tersendiri.
+        $response->assertJsonCount(1, 'sections');
+        $response->assertJsonPath('sections.0.code', 'TWK');
+
+        // top_recommendations tidak boleh berisi topic_id yang sama 2x.
+        $topicIds = collect($response->json('top_recommendations'))->pluck('topic_id');
+        $this->assertSame($topicIds->unique()->values()->all(), $topicIds->values()->all());
+    }
 }
