@@ -109,20 +109,27 @@ class TransactionController extends Controller
 
     /**
      * GET /api/transactions
+     * Eager-load package/plan/promo -- riwayat transaksi (mobile & web) perlu
+     * nama paket/plan buat ditampilkan di list, bukan cuma package_id/plan_id
+     * mentah. Sebelumnya tidak di-eager-load sama sekali (N+1 kalau frontend
+     * coba akses transaction.package.name, atau tampil kosong).
      */
     public function index(Request $request)
     {
-        return $request->user()->transactions()->latest()->get();
+        return $request->user()->transactions()->with(['package', 'plan', 'promo'])->latest()->get();
     }
 
     /**
      * GET /api/transactions/{transaction}
+     * `plan` ditambahkan ke load() -- sebelumnya cuma package+promo, jadi
+     * transaksi subscription (plan_id terisi, package_id null) detailnya
+     * tidak pernah menampilkan nama plan.
      */
     public function show(Request $request, Transaction $transaction)
     {
         abort_unless($transaction->user_id === $request->user()->id, 403, 'Bukan transaksi milik Anda.');
 
-        return $transaction->load('package', 'promo');
+        return $transaction->load('package', 'plan', 'promo');
     }
 
     /**
