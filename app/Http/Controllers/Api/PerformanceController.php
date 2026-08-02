@@ -26,7 +26,12 @@ class PerformanceController extends Controller
     public function performanceSummary(Request $request)
     {
         $user = $request->user();
-        $programId = $request->query('program_id', $user->preferred_program_id);
+        // Default ke program_id=1 (CPNS 2026) kalau user belum pernah pilih
+        // program (preferred_program_id null) dan tidak kirim query param.
+        // (Hotfix yang sempat ditempel manual langsung di server tanggal
+        // 2 Agu 2026 -- dibawa masuk ke git di sini supaya tidak hilang lagi
+        // kalau server di-pull ulang.)
+        $programId = (int) $request->query('program_id', $user->preferred_program_id ?? 1);
         $attemptsLimit = (int) $request->query('attempts_limit', 5);
 
         // context=tryout saja -- attempt dari exam Latihan Topik (context=
