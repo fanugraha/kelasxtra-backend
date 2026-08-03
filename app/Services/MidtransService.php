@@ -89,14 +89,23 @@ class MidtransService
     public function resumeTransaction(Transaction $transaction): string
     {
         $user = $transaction->user;
-        $package = $transaction->package;
+        // BUG FIX: sebelumnya method ini cuma pernah ditulis/ditest untuk
+        // transaksi package ($transaction->package langsung dipakai tanpa
+        // cek null) -- transaksi subscription (plan_id terisi, package_id
+        // null) bikin $package null dan meledak 500 di
+        // $package->id/$package->name. item bisa Package ATAU
+        // SubscriptionPlan, sama seperti pola di Promo::checkUsableBy/
+        // calculateDiscount.
+        $item = $transaction->package ?: $transaction->plan;
         $amount = (float) $transaction->amount;
 
-        if ($transaction->promo_id && $transaction->promo && $transaction->package) {
-            $error = $transaction->promo->checkUsableBy($user, $package);
+        if ($transaction->promo_id && $transaction->promo && $item) {
+            $error = $transaction->promo->checkUsableBy($user, $item);
 
             if ($error) {
-                $amount = (float) ($package->discount_price ?? $package->price);
+                $amount = $item instanceof Package
+                    ? (float) ($item->discount_price ?? $item->price)
+                    : (float) $item->price;
 
                 $transaction->update([
                     'promo_id' => null,
@@ -127,10 +136,10 @@ class MidtransService
             ],
             'item_details' => [
                 [
-                    'id' => (string) $package->id,
+                    'id' => $item instanceof Package ? (string) $item->id : 'plan-'.$item->id,
                     'price' => (int) round($amount),
                     'quantity' => 1,
-                    'name' => Str::limit($package->name, 50, ''),
+                    'name' => Str::limit($item->name, 50, ''),
                 ]
             ],
         ]);
