@@ -86,4 +86,38 @@ class MyExamsExcludesTopicPartTest extends TestCase
         $response->assertOk();
         $response->assertJson(['exam_id' => null]);
     }
+
+    public function test_latest_attempted_exam_primary_path_never_returns_topic_part(): void
+    {
+        $program = Program::factory()->create();
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        // Bug yang sebenarnya terjadi: user SUDAH attempt exam Part
+        // (bukan skenario "belum ada attempt sama sekali" seperti test
+        // fallback di atas). Sebelum fix, primary $latestAttempt query
+        // tidak filter tryout(), jadi exam Part ini bocor jadi exam_id
+        // yang dibalikkan -- bikin Continue Card Beranda nyangkut di
+        // exam Part yang sama terus-menerus.
+        $topic = $this->makeTopic($program);
+        $topicPart = Exam::factory()->create([
+            'program_id' => $program->id,
+            'topic_id' => $topic->id,
+            'part_number' => 1,
+            'is_free_preview' => true,
+        ]);
+
+        \App\Models\ExamAttempt::factory()->create([
+            'user_id' => $user->id,
+            'exam_id' => $topicPart->id,
+            'status' => 'submitted',
+            'started_at' => now(),
+            'finished_at' => now(),
+        ]);
+
+        $response = $this->getJson('/api/my-exams/latest-attempted');
+
+        $response->assertOk();
+        $response->assertJson(['exam_id' => null]);
+    }
 }

@@ -74,6 +74,77 @@ class TopicPracticeController extends Controller
     }
 
     /**
+     * GET /api/latihan-soal/latest-attempted
+     * Dipakai Continue Card di Beranda: topik latihan terakhir yang disentuh
+     * user (attempt manapun statusnya, termasuk in_progress), lengkap dengan
+     * posisi Part-nya (part_number/total_parts) dan status part berikutnya,
+     * supaya card bisa nampilkan "Lanjutkan Part X" atau "Part X dari Y
+     * selesai -- lanjut ke Part X+1" tanpa Flutter perlu query roadmap
+     * lengkap dulu.
+     */
+    public function latestAttempted(Request $request)
+    {
+        $user = $request->user();
+
+        $latestAttempt = ExamAttempt::where('user_id', $user->id)
+            ->whereNull('exam_batch_id')
+            ->whereHas('exam', fn ($q) => $q->topicPractice())
+            ->orderByDesc('started_at')
+            ->with('exam.topic')
+            ->first();
+
+        if (! $latestAttempt || ! $latestAttempt->exam?->topic) {
+            return response()->json(['topic_id' => null]);
+        }
+
+        $topic = $latestAttempt->exam->topic;
+
+        $parts = $topic->exams()->topicPractice()->orderBy('part_number')->get();
+        $examIds = $parts->pluck('id');
+
+        $attemptsByExamId = ExamAttempt::where('user_id', $user->id)
+            ->whereIn('exam_id', $examIds)
+            ->whereIn('status', ['submitted', 'auto_submitted', 'graded'])
+            ->get()
+            ->groupBy('exam_id');
+
+        $currentPart = $parts->firstWhere('id', $latestAttempt->exam_id);
+        $inProgress = $latestAttempt->status === 'in_progress' ? $latestAttempt : null;
+
+        $completedAttempts = $attemptsByExamId->get($currentPart->id, collect());
+        $isCurrentCompleted = $completedAttempts->isNotEmpty();
+        $bestScore = $completedAttempts->max('score');
+
+        $nextPart = $isCurrentCompleted
+            ? $parts->firstWhere('part_number', '>', $currentPart->part_number)
+            : null;
+
+        $nextPartUnlocked = $nextPart
+            ? $this->accessControl->canAccessExamPart($user, $nextPart)
+            : false;
+
+        return response()->json([
+            'topic_id' => $topic->id,
+            'topic_name' => $topic->name,
+            'current_part' => [
+                'exam_id' => $currentPart->id,
+                'part_number' => $currentPart->part_number,
+                'title' => $currentPart->title,
+                'in_progress_attempt_id' => $inProgress?->id,
+                'is_completed' => $isCurrentCompleted,
+                'best_score' => $bestScore,
+            ],
+            'total_parts' => $parts->count(),
+            'next_part' => $nextPart ? [
+                'exam_id' => $nextPart->id,
+                'part_number' => $nextPart->part_number,
+                'title' => $nextPart->title,
+                'unlocked' => $nextPartUnlocked,
+            ] : null,
+        ]);
+    }
+
+    /**
      * GET /api/latihan-soal/topics/{topic}/roadmap
      * Layar 3: daftar Part dalam 1 Topik beserta status akses tiap Part.
      *

@@ -150,6 +150,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Lihat AccessControlService::canAccessExamPart() untuk aturan aksesnya.
     Route::get('/latihan-soal/categories', [TopicPracticeController::class, 'categories']);
     Route::get('/latihan-soal/categories/{taxonomy}/topics', [TopicPracticeController::class, 'topics']);
+    Route::get('/latihan-soal/latest-attempted', [TopicPracticeController::class, 'latestAttempted']);
     Route::get('/latihan-soal/topics/{topic}/roadmap', [TopicPracticeController::class, 'roadmap']);
 
 });

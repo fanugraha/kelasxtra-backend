@@ -279,8 +279,14 @@ class ExamController extends Controller
     {
         $user = $request->user();
 
+        // whereHas exam->tryout(): exam Part (context=topic_practice) sengaja
+        // di-exclude di sini juga -- sebelumnya cuma di-exclude di fallback
+        // (baris di bawah), jadi kalau exam terakhir yang disentuh user
+        // ternyata Part, endpoint ini ikut "membocorkannya" ke Continue Card
+        // Beranda padahal Part punya flow/roadmap sendiri di TopicPracticeController.
         $latestAttempt = ExamAttempt::where('user_id', $user->id)
             ->whereNull('exam_batch_id')
+            ->whereHas('exam', fn ($q) => $q->tryout())
             ->orderByDesc('started_at')
             ->first();
 
@@ -470,6 +476,18 @@ public function forPackage(Request $request, \App\Models\Package $package)
             ];
         };
 
+        $partInfo = null;
+
+        if ($exam->isTopicPractice() && $exam->topic_id) {
+            $partInfo = [
+                'topic_id' => $exam->topic_id,
+                'part_number' => $exam->part_number,
+                'total_parts' => Exam::where('topic_id', $exam->topic_id)
+                    ->topicPractice()
+                    ->count(),
+            ];
+        }
+
         return response()->json([
             'exam' => [
                 'id' => $exam->id,
@@ -477,6 +495,7 @@ public function forPackage(Request $request, \App\Models\Package $package)
                 'duration_minutes' => $exam->duration_minutes,
                 'passing_score' => $exam->passing_score,
                 'is_free_preview' => $exam->is_free_preview,
+                'part' => $partInfo,
                 'sections' => $exam->sections->map(fn ($s) => [
                     'code' => $s->code,
                     'name' => $s->name,
